@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import './variables.css';
+
+@layer base {
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-inter);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Focus Styles */
+  *:focus-visible {
+    outline: var(--focus-outline-width) solid var(--focus-outline-color);
+    outline-offset: 2px;
+    box-shadow: var(--focus-outline-glow);
+  }
+
+  /* Reduced Motion */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .gradient-bg {
+    background: radial-gradient(
+        ellipse at top,
+        var(--color-gradient-purple) 0%,
+        transparent 50%
+      ),
+      linear-gradient(
+        180deg,
+        var(--color-gradient-purple) 0%,
+        var(--color-gradient-blue) 50%,
+        var(--color-gradient-teal) 100%
+      );
+  }
+
+  .gradient-text {
+    background: linear-gradient(
+      135deg,
+      var(--color-accent) 0%,
+      var(--color-accent-purple) 100%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .inner-glow {
+    box-shadow: inset 0 0 20px rgba(0, 217, 255, 0.1);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px var(--color-accent);
+  }
+
+  .glow-purple {
+    box-shadow: 0 0 20px var(--color-accent-purple);
+  }
+}
+

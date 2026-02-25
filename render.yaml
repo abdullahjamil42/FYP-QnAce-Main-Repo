@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: qnace-backend
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd integrated_system && python api/main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        fromService:
+          type: web
+          name: qnace-backend
+          property: port
+    healthCheckPath: /health

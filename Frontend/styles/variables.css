@@ -1,0 +1,48 @@
+:root {
+  /* Primary Colors */
+  --color-background: #0b0f17;
+  --color-foreground: #ffffff;
+  --color-primary: #0b0f17;
+  --color-primary-dark: #05080d;
+
+  /* Gradient Colors */
+  --color-gradient-purple: #1a0b2e;
+  --color-gradient-blue: #16213e;
+  --color-gradient-teal: #0f3460;
+
+  /* Accent Colors */
+  --color-accent: #00d9ff;
+  --color-accent-purple: #a855f7;
+
+  /* Typography */
+  --font-inter: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* Spacing */
+  --spacing-baseline: 8px;
+
+  /* Motion Durations */
+  --duration-micro: 80ms;
+  --duration-micro-fast: 120ms;
+  --duration-micro-slow: 220ms;
+  --duration-reveal-fast: 300ms;
+  --duration-reveal: 400ms;
+  --duration-reveal-slow: 550ms;
+
+  /* Focus Outline */
+  --focus-outline-width: 3px;
+  --focus-outline-color: var(--color-accent);
+  --focus-outline-glow: 0 0 0 var(--focus-outline-width) var(--focus-outline-color),
+    0 0 20px var(--focus-outline-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-micro: 0ms;
+    --duration-micro-fast: 0ms;
+    --duration-micro-slow: 0ms;
+    --duration-reveal-fast: 0ms;
+    --duration-reveal: 0ms;
+    --duration-reveal-slow: 0ms;
+  }
+}
+

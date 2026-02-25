@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  qnace-backend:
+    build: .
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env.production
+    environment:
+      - PYTHONPATH=/app/integrated_system:/app/interview_emotion_detection/src
+    volumes:
+      - ./outputs:/app/outputs
+      - ./embeddings_cache:/app/embeddings_cache
+    restart: unless-stopped
+
+  qnace-frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.production
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
+    volumes:
+      - ./Frontend:/app
+      - /app/node_modules
+    depends_on:
+      - qnace-backend
+    restart: unless-stopped
