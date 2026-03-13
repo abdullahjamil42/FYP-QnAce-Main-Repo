@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - QACE_ENV=development
+      - QACE_HOST=0.0.0.0
+      - QACE_PORT=8000
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - QACE_MODEL_DIR=/app/models
+    volumes:
+      - ../models:/app/models:ro
+      - ../data:/app/data:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../client
+      dockerfile: ../infra/Dockerfile.client
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_QACE_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qace-server"
+version = "0.1.0"
+description = "Q&Ace — Real-time AI Interview Preparation Backend"
+requires-python = ">=3.11"
+# Note: the Windows backend requires a CUDA-enabled PyTorch wheel for the vocal model.
+# The alternate wheel index cannot be expressed cleanly in pyproject metadata, so the
+# installable Windows torch pin lives in requirements.txt via the PyTorch cu124 index.
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0",
+    "aiortc>=1.9.0",
+    "numpy>=1.24.0",
+    "onnxruntime>=1.16.0",
+    "faster-whisper>=1.1.0",
+    "transformers>=4.48.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+asyncio_mode = "auto"

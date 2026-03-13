@@ -1,0 +1,40 @@
+# Q&Ace Backend Dependencies
+# Phase 1: Foundation — WebRTC + Audio Pipeline
+
+# ── Core ──
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+
+# ── WebRTC ──
+aiortc>=1.9.0
+
+# ── Audio / Numeric ──
+numpy>=1.24.0
+
+# ── VAD (Silero ONNX) ──
+onnxruntime>=1.16.0
+
+# ── STT (Faster-Whisper) ──
+faster-whisper>=1.1.0
+ctranslate2>=4.0.0
+
+# ── Vocal Emotion (Transformers + PyTorch CUDA on Windows) ──
+# Keep the default PyPI index for general packages and add the PyTorch CUDA wheel index
+# so the Windows backend installs a CUDA-enabled torch build instead of the CPU-only wheel.
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.6.0+cu124; sys_platform == "win32" and python_version == "3.11"
+transformers>=4.48.0
+
+# ── TTS (Phase 4 — Qwen3-TTS primary, edge-tts fallback) ──
+qwen-tts>=0.1.1
+edge-tts>=6.1.0
+soundfile>=0.13.1
+
+# ── Utilities ──
+httpx>=0.27.0
+huggingface-hub>=0.20.0
+requests>=2.31.0
+tqdm>=4.66.0
