@@ -181,3 +181,71 @@ class RunningScorer:
             "avg_final": avg.final,
             "utterance_count": self.count,
         }
+
+
+class InterviewScoringEngine:
+    """Compatibility scoring engine used by WebRTC signaling pipeline.
+
+    The signaling route expects a structured dict with `Sub_Scores`,
+    `Final_Score`, `Deduction_Flags`, and `Details`. This adapter builds
+    that payload from the scoring helpers in this module.
+    """
+
+    def evaluate_session(self, telemetry: dict) -> dict:
+        text_quality_score = float(telemetry.get("bert_base_score", 60.0) or 60.0)
+        wpm = float(telemetry.get("whisper_wpm", 0.0) or 0.0)
+        filler_count = int(telemetry.get("whisper_filler_count", 0) or 0)
+        duration_s = float(telemetry.get("whisper_duration_s", 3.0) or 3.0)
+        vocal_confidence = float(telemetry.get("wav2vec2_confidence", 0.0) or 0.0)
+        eye_contact = float(telemetry.get("mediapipe_eye_contact", 0.5) or 0.5)
+        blinks_per_min = float(telemetry.get("mediapipe_bpm", 17.5) or 17.5)
+
+        emotion_timeline = telemetry.get("emotion_timeline") or []
+        emotion_positivity = 0.5
+        if isinstance(emotion_timeline, list) and emotion_timeline:
+            maybe = emotion_timeline[-1]
+            if isinstance(maybe, (int, float)):
+                emotion_positivity = max(0.0, min(1.0, float(maybe)))
+
+        llm_star = telemetry.get("llm_star_evaluation", text_quality_score)
+        llm_modifier = max(-10.0, min(10.0, float(llm_star) - text_quality_score))
+
+        scores = compute_utterance_scores(
+            text_quality_score=text_quality_score,
+            wpm=wpm,
+            filler_count=filler_count,
+            duration_s=duration_s,
+            vocal_confidence=vocal_confidence,
+            eye_contact_ratio=eye_contact,
+            blinks_per_min=blinks_per_min,
+            emotion_positivity=emotion_positivity,
+            llm_modifier=llm_modifier,
+        )
+
+        deduction_flags: list[str] = []
+        if filler_count >= 6:
+            deduction_flags.append("high_fillers")
+        if wpm > 190:
+            deduction_flags.append("too_fast")
+        elif 0 < wpm < 105:
+            deduction_flags.append("too_slow")
+        if eye_contact < 0.35:
+            deduction_flags.append("low_eye_contact")
+
+        return {
+            "Sub_Scores": {
+                "Content": scores.content,
+                "Delivery": scores.delivery,
+                "Composure": scores.composure,
+            },
+            "Final_Score": scores.final,
+            "Deduction_Flags": deduction_flags,
+            "Details": {
+                "fluency": scores.fluency,
+                "wpm": wpm,
+                "filler_count": filler_count,
+                "eye_contact": eye_contact,
+                "vocal_confidence": vocal_confidence,
+                "text_quality_score": text_quality_score,
+            },
+        }

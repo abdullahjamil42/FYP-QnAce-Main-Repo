@@ -40,11 +40,16 @@ class EndOfSpeechDetector:
         min_speech_s: float = 0.5,
         silero_session: Any = None,
         on_speech_end: Optional[Callable[[np.ndarray], None]] = None,
+        semantic_turn_detector: Any = None,
+        partial_transcript_provider: Optional[Callable[[], str]] = None,
     ):
         self.silence_threshold = int(silence_ms / 1000.0 * SAMPLE_RATE)
         self.min_speech_samples = int(min_speech_s * SAMPLE_RATE)
         self.silero = silero_session
         self.on_speech_end = on_speech_end
+        # Optional Phase-advanced hooks are accepted for compatibility.
+        self.semantic_turn_detector = semantic_turn_detector
+        self.partial_transcript_provider = partial_transcript_provider
 
         # Silero runtime state — supports both legacy (h/c) and merged-state ONNX exports.
         self._silero_mode = "energy"
