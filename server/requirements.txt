@@ -26,10 +26,11 @@ ctranslate2>=4.0.0
 # so the Windows backend installs a CUDA-enabled torch build instead of the CPU-only wheel.
 --extra-index-url https://download.pytorch.org/whl/cu124
 torch==2.6.0+cu124; sys_platform == "win32" and python_version == "3.11"
-transformers>=4.48.0
+transformers==4.46.3
+peft==0.13.2
 
-# ── TTS (Phase 4 — Qwen3-TTS primary, edge-tts fallback) ──
-qwen-tts>=0.1.1
+# ── TTS (Phase 4 — ChatterBox primary, edge-tts fallback) ──
+chatterbox-tts==0.1.6
 edge-tts>=6.1.0
 soundfile>=0.13.1
 

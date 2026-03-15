@@ -16,7 +16,10 @@ import io
 import logging
 import math
 import os
+import re
 import time
+import site
+import glob
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -38,12 +41,72 @@ def _cudnn_needs_disable() -> bool:
     torch 2.6.0+cu124 ships cuDNN 9.1 which is missing cudnnGetLibConfig
     (added in 9.2).  Conv1d layers crash with Error 127 if cuDNN is enabled.
     """
+    force_enable = os.environ.get("QACE_FORCE_ENABLE_CUDNN", "").strip().lower()
+    if force_enable in {"1", "true", "yes", "on"}:
+        return False
+
+    force = os.environ.get("QACE_FORCE_DISABLE_CUDNN", "").strip().lower()
+    if force in {"1", "true", "yes", "on"}:
+        return True
+
     if os.name != "nt":
         return False
     try:
         import ctypes
-        dll = ctypes.WinDLL("cudnn64_9.dll")
-        return not hasattr(dll, "cudnnGetLibConfig")
+
+        # Prefer cuDNN wheels in the current Python env on Windows.
+        roots = site.getsitepackages() + [site.getusersitepackages()]
+        bins: list[str] = []
+        patterns = [
+            ("nvidia", "cudnn", "bin"),
+            ("nvidia", "cublas", "bin"),
+            ("nvidia", "cuda_nvrtc", "bin"),
+            ("nvidia", "cuda_runtime", "bin"),
+        ]
+        for root in roots:
+            for pat in patterns:
+                bins.extend(glob.glob(os.path.join(root, *pat)))
+        bins = [p for p in bins if os.path.isdir(p)]
+        for p in bins:
+            try:
+                os.add_dll_directory(p)
+            except Exception:
+                pass
+
+        candidates: list[str] = []
+        for p in bins:
+            candidates.extend(glob.glob(os.path.join(p, "cudnn64_9.dll")))
+        cudnn_bin = os.path.dirname(candidates[0]) if candidates else ""
+
+        # Some Windows setups require explicit preload of split cuDNN DLLs.
+        preload = [
+            "cudnn_ops64_9.dll",
+            "cudnn_cnn64_9.dll",
+            "cudnn_adv64_9.dll",
+            "cudnn_graph64_9.dll",
+            "cudnn_heuristic64_9.dll",
+            "cudnn_engines_precompiled64_9.dll",
+            "cudnn_engines_runtime_compiled64_9.dll",
+        ]
+        if cudnn_bin:
+            for name in preload:
+                try:
+                    ctypes.WinDLL(os.path.join(cudnn_bin, name))
+                except Exception:
+                    pass
+
+        dll_path = candidates[0] if candidates else "cudnn64_9.dll"
+        dll = ctypes.WinDLL(dll_path)
+
+        # Primary signal: runtime cuDNN version.
+        try:
+            dll.cudnnGetVersion.restype = ctypes.c_size_t
+            ver = int(dll.cudnnGetVersion())
+            # cuDNN 9.2.x => 902xx. Disable only for versions below 9.2.
+            return ver < 90200
+        except Exception:
+            # Fallback signal for older builds.
+            return not hasattr(dll, "cudnnGetLibConfig")
     except OSError:
         return False
 
@@ -56,8 +119,69 @@ def _should_disable_cudnn() -> bool:
     if _CUDNN_DISABLE is None:
         _CUDNN_DISABLE = _cudnn_needs_disable()
         if _CUDNN_DISABLE:
-            logger.warning("cuDNN 9.1 detected (missing cudnnGetLibConfig) — will disable during TTS inference")
+            logger.warning("cuDNN runtime detected as < 9.2 (or incompatible) — will disable during TTS inference")
     return _CUDNN_DISABLE
+
+
+def split_text_for_tts_streaming(text: str, max_chars: int = 150) -> list[str]:
+    """Split text into sentence-like chunks capped by max_chars for faster synth."""
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    if not normalized:
+        return []
+
+    # Primary split by sentence boundaries.
+    sentence_parts = [
+        p.strip() for p in re.split(r"(?<=[.!?])\s+", normalized) if p.strip()
+    ]
+    if not sentence_parts:
+        sentence_parts = [normalized]
+
+    chunks: list[str] = []
+    cap = max(40, int(max_chars))
+    for part in sentence_parts:
+        if len(part) <= cap:
+            chunks.append(part)
+            continue
+
+        # Secondary split by comma/semicolon for long sentences.
+        clauses = [c.strip() for c in re.split(r"(?<=[,;:])\s+", part) if c.strip()]
+        if not clauses:
+            clauses = [part]
+
+        current = ""
+        for clause in clauses:
+            if not current:
+                current = clause
+                continue
+            candidate = f"{current} {clause}"
+            if len(candidate) <= cap:
+                current = candidate
+            else:
+                chunks.append(current)
+                current = clause
+        if current:
+            chunks.append(current)
+
+    # Final safety: hard wrap anything still over cap by whitespace.
+    final_chunks: list[str] = []
+    for chunk in chunks:
+        if len(chunk) <= cap:
+            final_chunks.append(chunk)
+            continue
+        words = chunk.split()
+        current = ""
+        for w in words:
+            candidate = w if not current else f"{current} {w}"
+            if len(candidate) <= cap:
+                current = candidate
+            else:
+                if current:
+                    final_chunks.append(current)
+                current = w
+        if current:
+            final_chunks.append(current)
+
+    return final_chunks
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +227,43 @@ def _load_chatterbox_model(device: str = "auto"):
             model = ChatterboxTurboTTS.from_local(local_path, device)
     finally:
         torch.backends.cudnn.enabled = prev_cudnn
+
+    # Optional runtime optimizations for lower per-call latency.
+    if device == "cuda":
+        target_module = None
+        try:
+            import torch.nn as nn
+
+            if isinstance(getattr(model, "model", None), nn.Module):
+                target_module = model.model
+            elif isinstance(model, nn.Module):
+                target_module = model
+        except Exception:
+            target_module = None
+
+        use_half = os.environ.get("QACE_CHATTERBOX_HALF", "1").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        if target_module is not None and use_half:
+            try:
+                target_module.half()
+                logger.info("ChatterBox runtime: fp16 enabled")
+            except Exception as exc:
+                logger.warning("ChatterBox fp16 cast failed (%s) — continuing", exc)
+
+        use_compile = os.environ.get("QACE_CHATTERBOX_COMPILE", "1").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        if target_module is not None and use_compile and hasattr(torch, "compile"):
+            try:
+                compiled = torch.compile(target_module, mode="reduce-overhead")
+                if getattr(model, "model", None) is target_module:
+                    model.model = compiled
+                else:
+                    model = compiled
+                logger.info("ChatterBox runtime: torch.compile enabled (reduce-overhead)")
+            except Exception as exc:
+                logger.warning("ChatterBox compile failed (%s) — continuing", exc)
 
     ms = (time.perf_counter() - t0) * 1000.0
     logger.info("ChatterBox Turbo loaded ✓ on %s (%.0fms)", device, ms)

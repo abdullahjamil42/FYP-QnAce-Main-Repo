@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from fastapi import APIRouter, HTTPException
@@ -24,6 +24,131 @@ router = APIRouter()
 
 # ── In-memory session store ──
 _sessions: dict[str, dict[str, Any]] = {}
+_semantic_detector: Any = None
+
+INTRO_QUESTION = (
+    "Welcome to your software interview. Please start with a short introduction: "
+    "your background, your current role, and one project you are proud of."
+)
+
+SOFTWARE_INTERVIEW_QUESTIONS = [
+    "Explain a backend system you built. What were the core components and trade-offs?",
+    "Tell me about a production bug you diagnosed. How did you isolate and fix it?",
+    "How do you design a REST API for reliability and versioning?",
+    "Describe a time you improved application performance. What metrics moved?",
+    "How would you design caching for a high-traffic read-heavy service?",
+    "What testing strategy do you use across unit, integration, and end-to-end tests?",
+    "Describe a difficult code review discussion and how you resolved it.",
+    "If you had to scale this app to 10x users, what would you change first?",
+]
+
+
+def _next_interview_prompt(session: dict[str, Any]) -> str | None:
+    """Advance interview state and return the next software-themed prompt."""
+    stage = session.get("interview_stage", "intro")
+    idx = int(session.get("interview_question_idx", 0))
+
+    if stage == "intro":
+        session["interview_stage"] = "questions"
+        if SOFTWARE_INTERVIEW_QUESTIONS:
+            session["interview_question_idx"] = 1
+            return f"Great introduction. First question: {SOFTWARE_INTERVIEW_QUESTIONS[0]}"
+        return "Great introduction."
+
+    if idx < len(SOFTWARE_INTERVIEW_QUESTIONS):
+        session["interview_question_idx"] = idx + 1
+        return f"Next question: {SOFTWARE_INTERVIEW_QUESTIONS[idx]}"
+
+    return (
+        "That concludes this software interview set. Nice work. "
+        "If you want, we can start a new round focused on system design."
+    )
+
+
+def _get_semantic_detector(settings: Any) -> Any:
+    """Lazy singleton semantic detector shared across sessions."""
+    global _semantic_detector
+    if not getattr(settings, "semantic_vad_enabled", True):
+        return None
+    if _semantic_detector is not None:
+        return _semantic_detector
+    try:
+        from ..vad.semantic_turn_detector import SemanticTurnDetector
+
+        _semantic_detector = SemanticTurnDetector(
+            min_silence_ms=settings.semantic_min_silence_ms,
+            max_silence_ms=settings.semantic_max_silence_ms,
+            semantic_threshold=settings.semantic_threshold,
+            model_name=settings.semantic_model,
+        )
+        logger.info(
+            "Semantic VAD enabled ✓ (min=%dms max=%dms threshold=%.2f)",
+            settings.semantic_min_silence_ms,
+            settings.semantic_max_silence_ms,
+            settings.semantic_threshold,
+        )
+    except Exception as exc:
+        logger.warning("Semantic VAD init failed (%s) — using silence-only VAD", exc)
+        _semantic_detector = None
+    return _semantic_detector
+
+
+async def _speak_session_text(
+    session: dict[str, Any],
+    dc: Any,
+    text: str,
+    send_status_fn: Callable[[Any, str], None],
+    started_at: float | None = None,
+) -> float:
+    """Speak text over the TTS track and return first-audio latency in ms."""
+    tts_eng = session.get("tts_engine")
+    tts_track = session.get("tts_track")
+    if tts_eng is None or tts_track is None or not text.strip():
+        return 0.0
+
+    from ..config import get_settings
+    from ..synthesis.tts import split_text_for_tts_streaming
+
+    settings = get_settings()
+    max_chars = max(60, int(getattr(settings, "tts_chunk_max_chars", 150)))
+    use_sentence_streaming = bool(getattr(settings, "tts_sentence_streaming", True))
+
+    if use_sentence_streaming:
+        chunks = split_text_for_tts_streaming(text, max_chars=max_chars)
+    else:
+        chunks = [text[:max_chars]] if len(text) > max_chars else [text]
+
+    if not chunks:
+        return 0.0
+
+    first_audio_ms = 0.0
+    total_duration_s = 0.0
+    session["speaking"] = True
+    send_status_fn(dc, f"tts-stream: chunks={len(chunks)} max_chars={max_chars}")
+
+    for idx, chunk in enumerate(chunks):
+        synth_t0 = time.perf_counter()
+        tts_result = await tts_eng.synthesize(chunk)
+        if tts_result.audio_pcm is None or len(tts_result.audio_pcm) == 0:
+            continue
+
+        tts_track.enqueue_audio(tts_result.audio_pcm, tts_result.sample_rate)
+        total_duration_s += float(tts_result.duration_s)
+
+        if idx == 0:
+            first_audio_ms = (time.perf_counter() - (started_at if started_at is not None else synth_t0)) * 1000.0
+
+        rms = float(np.sqrt(np.mean(tts_result.audio_pcm.astype(np.float32) ** 2))) / 32768.0
+        session["audio_energy"] = rms
+
+    # Keep speaking state active briefly to drive avatar animation while queued audio plays.
+    if total_duration_s > 0.0:
+        send_status_fn(dc, f"tts: {total_duration_s:.1f}s via {getattr(tts_eng, 'engine_name', 'tts')}")
+        await asyncio.sleep(min(total_duration_s, 2.0))
+
+    session["speaking"] = False
+    session["audio_energy"] = 0.0
+    return first_audio_ms
 
 
 def _build_fallback_feedback(
@@ -98,12 +223,10 @@ async def handle_offer(req: OfferRequest):
     from ..config import get_settings
     from ..models import registry
     from ..intelligence.rag import retrieve as rag_retrieve
-    from ..intelligence.scoring import RunningScorer, compute_utterance_scores
-    from ..intelligence.llm import build_system_prompt, resolve_provider_config, stream_llm
+    from ..intelligence.scoring import InterviewScoringEngine, RunningScorer, UtteranceScores
     from ..perception.stt import transcribe
     from ..perception.text_quality import classify_quality
     from ..perception.vocal import analyze as vocal_analyze
-    from ..synthesis.punctuation_buffer import PunctuationBuffer
     from ..vad.ring_buffer import RingBuffer
     from ..vad.silero import EndOfSpeechDetector
     from ..webrtc.data_channel import (
@@ -134,11 +257,17 @@ async def handle_offer(req: OfferRequest):
         "stt_model": registry.whisper_model,
         "stt_device": getattr(registry, "whisper_model_device", None),
         "scorer": RunningScorer(),
+        "interview_scorer": InterviewScoringEngine(),
         # Phase 4 synthesis state
         "tts_engine": getattr(registry, "tts_engine", None),
         "avatar_engine": getattr(registry, "avatar_engine", None),
         "speaking": False,
         "audio_energy": 0.0,
+        "interview_stage": "intro",
+        "interview_question_idx": 0,
+        "interview_started": False,
+        "latest_partial_transcript": "",
+        "latest_transcript_text": "",
     }
     _sessions[session_id] = session
 
@@ -185,7 +314,7 @@ async def handle_offer(req: OfferRequest):
             percept_ms = (time.perf_counter() - t_percept) * 1000.0
             tq_ms = tq_result.inference_ms
             vocal_ms = vocal_result.inference_ms
-            rag_ms = percept_ms  # wall-clock for the parallel group
+            rag_ms = rag_result.retrieval_ms
 
             # 3. AU telemetry snapshot
             au = session.get("latest_au")
@@ -195,21 +324,45 @@ async def handle_offer(req: OfferRequest):
             positive_emotions = {"confident", "composed", "engaged", "happy", "positive"}
             emotion_positivity = 0.7 if vocal_result.dominant_emotion in positive_emotions else 0.3
 
-            # 4. Compute scores
-            scores = compute_utterance_scores(
-                text_quality_score=tq_result.base_score,
-                wpm=result.wpm,
-                filler_count=result.filler_count,
-                duration_s=dur_s,
-                vocal_confidence=vocal_result.acoustic_confidence,
-                eye_contact_ratio=eye_contact,
-                blinks_per_min=blinks_per_min,
-                emotion_positivity=emotion_positivity,
+            # 4. Compute scores (master interview scoring engine)
+            interview_scorer: InterviewScoringEngine = session.get("interview_scorer")
+            telemetry = {
+                "bert_classification": tq_result.label,
+                "bert_base_score": tq_result.base_score,
+                "llm_star_evaluation": tq_result.base_score,
+                "whisper_wpm": result.wpm,
+                "whisper_filler_count": result.filler_count,
+                "whisper_word_count": len(result.text.split()) if result.text else 0,
+                "whisper_duration_s": dur_s,
+                "wav2vec2_confidence": vocal_result.acoustic_confidence,
+                "mediapipe_eye_contact": eye_contact,
+                "mediapipe_bpm": blinks_per_min,
+                "action_units": [],
+                "emotion_timeline": [],
+            }
+            interview_scores = interview_scorer.evaluate_session(telemetry)
+
+            latest_scores = UtteranceScores(
+                content=float(interview_scores["Sub_Scores"]["Content"]),
+                delivery=float(interview_scores["Sub_Scores"]["Delivery"]),
+                composure=float(interview_scores["Sub_Scores"]["Composure"]),
+                final=float(interview_scores["Final_Score"]),
+                fluency=float(interview_scores["Details"].get("fluency", 0.0)),
+                vocal_confidence=round(float(vocal_result.acoustic_confidence), 3),
+                eye_contact=round(float(eye_contact), 3),
+                blink_deviation=round(abs(float(blinks_per_min) - 17.5) / 17.5, 3),
+                emotion_positivity=round(float(emotion_positivity), 3),
+                text_quality_score=round(float(tq_result.base_score), 1),
             )
 
-            session["scorer"].add(scores)
-            send_scores(dc, session["scorer"].to_dict())
-            send_status(dc, f"scores: {scores.final:.1f}/100")
+            session["scorer"].add(latest_scores)
+            scores_payload = session["scorer"].to_dict()
+            scores_payload["deduction_flags"] = interview_scores.get("Deduction_Flags", [])
+            scores_payload["details"] = interview_scores.get("Details", {})
+            send_scores(dc, scores_payload)
+            send_status(dc, f"scores: {latest_scores.final:.1f}/100")
+            if interview_scores.get("Deduction_Flags"):
+                send_status(dc, f"score-flags: {', '.join(interview_scores['Deduction_Flags'])}")
 
             # 5. Send perception
             send_perception(dc, {
@@ -226,154 +379,134 @@ async def handle_offer(req: OfferRequest):
             # 6. RAG context
             rubric_context = "\n---\n".join(rag_result.passages) if rag_result.passages else ""
             if rubric_context:
-                send_status(dc, f"rag: {len(rag_result.passages)} passages in {percept_ms:.0f}ms")
+                send_status(dc, f"rag: {len(rag_result.passages)} passages in {rag_ms:.0f}ms")
 
             # 7. Optional LLM feedback (Groq or Airforce) → TTS → Avatar
-            provider_config = resolve_provider_config(settings)
             llm_ttft_ms = 0.0
+            classifier_ms = 0.0
+            generator_ms = 0.0
             tts_first_ms = 0.0
+            word_count = len(result.text.split())
+            send_status(dc, f"interview: answer received ({word_count} words)")
 
-            async def _speak_feedback_text(feedback_text: str, started_at: float | None = None) -> None:
-                nonlocal tts_first_ms
-                tts_eng = session.get("tts_engine")
-                tts_track = session.get("tts_track")
-                if tts_eng is None or tts_track is None:
-                    return
-                t0 = time.perf_counter()
-                tts_result = await tts_eng.synthesize(feedback_text)
-                elapsed_ms = (time.perf_counter() - (started_at if started_at is not None else t0)) * 1000.0
-                if tts_first_ms == 0.0:
-                    tts_first_ms = elapsed_ms
-                if tts_result.audio_pcm is not None and len(tts_result.audio_pcm) > 0:
-                    tts_track.enqueue_audio(tts_result.audio_pcm, tts_result.sample_rate)
-                    rms = float(np.sqrt(np.mean(tts_result.audio_pcm.astype(np.float32) ** 2))) / 32768.0
-                    session["speaking"] = True
-                    session["audio_energy"] = rms
-                    send_status(dc, f"tts: {tts_result.duration_s:.1f}s via {tts_result.engine_name}")
-                    await asyncio.sleep(min(tts_result.duration_s, 2.0))
-                session["speaking"] = False
-                session["audio_energy"] = 0.0
+            next_prompt = _next_interview_prompt(session)
+            if next_prompt:
+                from ..intelligence import interviewer as interviewer_intel
 
-            if provider_config:
-                send_status(dc, "generating feedback…")
-                system_prompt = build_system_prompt(
-                    rubric_context=rubric_context,
-                    vocal_emotion=vocal_result.dominant_emotion,
-                    acoustic_confidence=vocal_result.acoustic_confidence,
-                    face_emotion="neutral",
-                    text_quality_label=tq_result.label,
-                    text_quality_score=tq_result.base_score,
-                    wpm=result.wpm,
-                    filler_count=result.filler_count,
+                current_question = str(session.get("current_question") or INTRO_QUESTION)
+                interviewer_state = session.get("interviewer_state")
+                conversation_history = session.get("interviewer_history") or []
+                previous_modes = (interviewer_state or {}).get("last_modes", [])
+                previous_mode = previous_modes[-1] if previous_modes else ""
+                monologue_flag = bool(
+                    word_count >= max(10, int(getattr(settings, "interview_interrupt_word_limit", 250)))
                 )
-                feedback_chunks: list[str] = []
-                tts_text_queue: asyncio.Queue[str | None] = asyncio.Queue()
-                t_llm_start = time.perf_counter()
-                llm_first_token_seen = False
-                tts_first_audio_seen = False
-                llm_error_text: str | None = None
 
-                def on_llm_chunk(chunk: str):
-                    nonlocal llm_ttft_ms, llm_first_token_seen, llm_error_text
-                    text = chunk.strip()
-                    if not llm_first_token_seen:
-                        llm_ttft_ms = (time.perf_counter() - t_llm_start) * 1000.0
-                        llm_first_token_seen = True
-                    if not feedback_chunks and _is_unusable_llm_feedback(text):
-                        llm_error_text = text
+                stream_state = {
+                    "first_audio_ms": 0.0,
+                    "total_duration_s": 0.0,
+                    "chunks": 0,
+                }
+
+                async def _on_generator_sentence_chunk(sentence: str) -> None:
+                    tts_eng = session.get("tts_engine")
+                    tts_track = session.get("tts_track")
+                    if tts_eng is None or tts_track is None:
                         return
-                    feedback_chunks.append(chunk)
-                    send_status(dc, f"llm-{provider_config.provider}-chunk: {chunk[:80]}")
-                    tts_text_queue.put_nowait(chunk)
 
-                tts_track = session.get("tts_track")
-                tts_eng = session.get("tts_engine")
+                    from ..synthesis.tts import split_text_for_tts_streaming
 
-                async def _tts_consumer():
-                    nonlocal tts_first_ms, tts_first_audio_seen
-                    while True:
-                        text = await tts_text_queue.get()
-                        if text is None:
-                            break
-                        if tts_eng is None:
+                    max_chars = max(60, int(getattr(settings, "tts_chunk_max_chars", 150)))
+                    chunks = split_text_for_tts_streaming(sentence, max_chars=max_chars)
+                    if not chunks:
+                        return
+
+                    session["speaking"] = True
+                    for chunk in chunks:
+                        tts_result = await tts_eng.synthesize(chunk)
+                        if tts_result.audio_pcm is None or len(tts_result.audio_pcm) == 0:
                             continue
-                        # Drain additional queued chunks to batch them
-                        # into a single TTS call (reduces HTTP roundtrips)
-                        parts = [text]
-                        while not tts_text_queue.empty():
-                            extra = tts_text_queue.get_nowait()
-                            if extra is None:
-                                break
-                            parts.append(extra)
-                        else:
-                            extra = None  # didn't hit sentinel
-                        batch_text = " ".join(parts)
-                        try:
-                            tts_result = await tts_eng.synthesize(batch_text)
-                            if tts_result.audio_pcm is not None and len(tts_result.audio_pcm) > 0:
-                                if not tts_first_audio_seen:
-                                    tts_first_ms = (time.perf_counter() - t_llm_start) * 1000.0
-                                    tts_first_audio_seen = True
-                                if tts_track is not None:
-                                    tts_track.enqueue_audio(tts_result.audio_pcm, tts_result.sample_rate)
-                                rms = float(np.sqrt(np.mean(
-                                    tts_result.audio_pcm.astype(np.float32) ** 2
-                                ))) / 32768.0
-                                session["speaking"] = True
-                                session["audio_energy"] = rms
-                                send_status(dc, f"tts: {tts_result.duration_s:.1f}s via {tts_result.engine_name}")
-                        except Exception as tts_exc:
-                            logger.warning("TTS synthesis error: %s", tts_exc)
-                        if extra is None:
-                            break  # sentinel was consumed
+                        tts_track.enqueue_audio(tts_result.audio_pcm, tts_result.sample_rate)
+                        stream_state["chunks"] += 1
+                        stream_state["total_duration_s"] += float(tts_result.duration_s)
+                        if stream_state["first_audio_ms"] <= 0.0:
+                            stream_state["first_audio_ms"] = (
+                                (time.perf_counter() - t_pipeline_start) * 1000.0
+                            )
+                        rms = float(np.sqrt(np.mean(tts_result.audio_pcm.astype(np.float32) ** 2))) / 32768.0
+                        session["audio_energy"] = rms
+
+                turn_result = await interviewer_intel.generate_interviewer_turn(
+                    transcript=result.text,
+                    current_question=current_question,
+                    ideal_answer_rubric=rubric_context,
+                    rag_passages=list(rag_result.passages or []),
+                    rag_distances=list(rag_result.distances or []),
+                    vocal_confidence=float(vocal_result.acoustic_confidence),
+                    text_quality_score=float(tq_result.base_score),
+                    text_quality_label=str(tq_result.label),
+                    conversation_history=conversation_history,
+                    previous_mode=previous_mode,
+                    session_state=interviewer_state,
+                    monologue_flag=monologue_flag,
+                    next_question=next_prompt,
+                    settings=settings,
+                    on_generator_sentence_chunk=_on_generator_sentence_chunk,
+                )
+
+                session["interviewer_state"] = turn_result.get("state")
+                session["interviewer_history"] = turn_result.get("history", conversation_history)
+                llm_ttft_ms = float(turn_result.get("llm_ttft_ms", 0.0))
+                classifier_ms = float(turn_result.get("classifier_ms", 0.0))
+                generator_ms = float(turn_result.get("generator_ms", 0.0))
+
+                interviewer_text = str(turn_result.get("spoken_response") or next_prompt)
+                mode = str(turn_result.get("mode") or "PROBE_GAP")
+                evidence = str(turn_result.get("evidence") or "")
+                streamed_chunk_count = int(turn_result.get("streamed_chunk_count", 0))
+                send_status(dc, f"interview-mode: {mode}")
+                send_status(
+                    dc,
+                    (
+                        "interviewer-latency: "
+                        f"classifier={classifier_ms:.0f}ms "
+                        f"generator={generator_ms:.0f}ms "
+                        f"ttft={llm_ttft_ms:.0f}ms"
+                    ),
+                )
+                if evidence:
+                    send_status(dc, f"interview-evidence: {evidence[:140]}")
+
+                send_status(dc, f"question: {interviewer_text[:180]}")
+                if streamed_chunk_count > 0 and stream_state["chunks"] > 0:
+                    tts_first_ms = float(stream_state["first_audio_ms"])
+                    send_status(
+                        dc,
+                        (
+                            "tts-streamed: "
+                            f"chunks={stream_state['chunks']} "
+                            f"duration={stream_state['total_duration_s']:.1f}s"
+                        ),
+                    )
+                    if stream_state["total_duration_s"] > 0.0:
+                        await asyncio.sleep(min(float(stream_state["total_duration_s"]), 2.0))
                     session["speaking"] = False
                     session["audio_energy"] = 0.0
-                    if tts_track is not None:
-                        tts_track.finish()
-
-                consumer_task = asyncio.create_task(_tts_consumer())
-
-                buf = PunctuationBuffer(on_chunk=on_llm_chunk)
-                async for token in stream_llm(result.text, system_prompt, provider_config):
-                    buf.feed(token)
-                buf.flush()
-                tts_text_queue.put_nowait(None)
-                await consumer_task
-
-                full_feedback = "".join(feedback_chunks).strip()
-                if llm_error_text or not full_feedback:
-                    if llm_error_text:
-                        logger.warning(
-                            "LLM provider %s returned unusable feedback: %s",
-                            provider_config.provider,
-                            llm_error_text[:120],
-                        )
-                        send_status(dc, f"llm-{provider_config.provider}-fallback: {llm_error_text[:80]}")
-                    fallback_feedback = _build_fallback_feedback(
-                        transcript=result.text,
-                        text_quality_label=tq_result.label,
-                        filler_count=result.filler_count,
-                        wpm=result.wpm,
-                    )
-                    send_status(dc, f"feedback: {fallback_feedback[:120]}")
-                    await _speak_feedback_text(fallback_feedback, t_llm_start)
                 else:
-                    send_status(dc, f"feedback: {full_feedback[:120]}")
-            else:
-                send_status(dc, "llm: no configured Groq or Airforce API key — using local fallback feedback")
-                fallback_feedback = _build_fallback_feedback(
-                    transcript=result.text,
-                    text_quality_label=tq_result.label,
-                    filler_count=result.filler_count,
-                    wpm=result.wpm,
-                )
-                send_status(dc, f"feedback: {fallback_feedback[:120]}")
-                await _speak_feedback_text(fallback_feedback)
+                    tts_first_ms = await _speak_session_text(
+                        session,
+                        dc,
+                        interviewer_text,
+                        send_status,
+                        t_pipeline_start,
+                    )
+                session["current_question"] = next_prompt
 
             # 8. Latency summary
             total_ms = (time.perf_counter() - t_pipeline_start) * 1000.0
             latency_report = (
-                f"latency: percept={percept_ms:.0f}ms(tq={tq_ms:.0f}+vocal={vocal_ms:.0f}+rag) "
+                f"latency: percept={percept_ms:.0f}ms(tq={tq_ms:.0f}+vocal={vocal_ms:.0f}+rag={rag_ms:.0f}) "
+                f"interviewer=cls:{classifier_ms:.0f}ms+gen:{generator_ms:.0f}ms "
                 f"llm_ttft={llm_ttft_ms:.0f}ms "
                 f"tts_first={tts_first_ms:.0f}ms total={total_ms:.0f}ms"
             )
@@ -446,6 +579,8 @@ async def handle_offer(req: OfferRequest):
 
                 dc = session.get("data_channel")
                 if result.text:
+                    session["latest_transcript_text"] = result.text
+                    session["latest_partial_transcript"] = result.text
                     send_transcript(
                         dc,
                         result.text,
@@ -499,6 +634,12 @@ async def handle_offer(req: OfferRequest):
         min_speech_s=settings.vad_min_speech_s,
         silero_session=registry.silero_vad,
         on_speech_end=on_speech_end,
+        semantic_turn_detector=_get_semantic_detector(settings),
+        partial_transcript_provider=lambda: (
+            session.get("latest_partial_transcript")
+            or session.get("latest_transcript_text")
+            or ""
+        ),
     )
 
     @pc.on("track")
@@ -522,8 +663,24 @@ async def handle_offer(req: OfferRequest):
             session["data_channel"] = channel
             send_status(channel, "server-datachannel-ready")
 
+            if not session.get("interview_started", False):
+                session["interview_started"] = True
+                send_status(channel, f"question: {INTRO_QUESTION}")
+                asyncio.create_task(_speak_session_text(session, channel, INTRO_QUESTION, send_status))
+
             @channel.on("message")
             def on_message(message):
+                if isinstance(message, str):
+                    try:
+                        import json
+
+                        payload = json.loads(message)
+                        if isinstance(payload, dict) and payload.get("type") == "partial_transcript":
+                            text = payload.get("text", "")
+                            if isinstance(text, str):
+                                session["latest_partial_transcript"] = text
+                    except Exception:
+                        pass
                 logger.debug("DataChannel message: %s", str(message)[:100])
 
         elif channel.label == "au-telemetry":

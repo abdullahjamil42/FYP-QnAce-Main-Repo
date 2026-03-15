@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
+from .intelligence.llm import check_local_llm_endpoint
 from .intelligence.rag import init_rag
 from .models.registry import prewarm_all
 
@@ -24,14 +25,32 @@ logger = logging.getLogger("qace")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: load models. Shutdown: cleanup."""
+    settings = get_settings()
     logging.basicConfig(
-        level=getattr(logging, get_settings().log_level.upper(), logging.INFO),
+        level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     logger.info("Q&Ace server starting …")
+
+    if settings.normalized_llm_provider == "local":
+        if settings.local_llm_base_url.strip():
+            ok, detail = check_local_llm_endpoint(settings.local_llm_base_url)
+            if ok:
+                logger.info("Local LLM endpoint mode ✓ %s", detail)
+            else:
+                logger.warning("Local LLM endpoint mode ✗ %s", detail)
+        elif settings.local_llm_base_model.strip() and settings.local_llm_adapter_path.strip():
+            logger.info(
+                "Local LLM PEFT mode ✓ base=%s adapter=%s",
+                settings.local_llm_base_model,
+                settings.local_llm_adapter_path,
+            )
+        else:
+            logger.info("Local LLM model-path mode ✓ path=%s", settings.local_llm_path)
+
     await prewarm_all()
     # Phase 3: init RAG
-    init_rag(get_settings().chroma_dir)
+    init_rag(settings.chroma_dir)
     yield
     logger.info("Q&Ace server shutting down.")
 
