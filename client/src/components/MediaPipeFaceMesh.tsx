@@ -37,6 +37,7 @@ interface MediaPipeFaceMeshProps {
   onResults?: (result: FaceMeshResult | null) => void;
   showOverlay?: boolean;
   fps?: number;
+  videoClassName?: string;
 }
 
 /**
@@ -102,6 +103,7 @@ export default function MediaPipeFaceMesh({
   onResults,
   showOverlay = true,
   fps = 10,
+  videoClassName = "h-64 w-64 rounded-2xl",
 }: MediaPipeFaceMeshProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -251,7 +253,7 @@ export default function MediaPipeFaceMesh({
     <div className="relative">
       <video
         ref={videoRef}
-        className="h-64 w-64 rounded-2xl bg-qace-surface object-cover shadow-lg"
+        className={`${videoClassName} bg-qace-surface object-cover shadow-lg`}
         autoPlay
         playsInline
         muted
@@ -259,7 +261,7 @@ export default function MediaPipeFaceMesh({
       {showOverlay && (
         <canvas
           ref={canvasRef}
-          className="pointer-events-none absolute inset-0 h-64 w-64 rounded-2xl"
+          className={`pointer-events-none absolute inset-0 ${videoClassName}`}
         />
       )}
       {error && (

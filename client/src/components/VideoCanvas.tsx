@@ -23,6 +23,9 @@ interface VideoCanvasProps {
   onFaceCropStream?: (stream: MediaStream) => void;
   onAUTelemetry?: (buffer: ArrayBuffer) => void;
   showOverlay?: boolean;
+  containerClassName?: string;
+  videoClassName?: string;
+  showStats?: boolean;
 }
 
 export default function VideoCanvas({
@@ -30,6 +33,9 @@ export default function VideoCanvas({
   onFaceCropStream,
   onAUTelemetry,
   showOverlay = true,
+  containerClassName,
+  videoClassName,
+  showStats = true,
 }: VideoCanvasProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const cropRef = useRef<{
@@ -98,7 +104,7 @@ export default function VideoCanvas({
   );
 
   return (
-    <div className="flex flex-col items-center gap-2">
+    <div className={containerClassName ?? "flex flex-col items-center gap-2"}>
       {/* Hidden video element for crop extraction */}
       <video
         ref={videoRef}
@@ -114,10 +120,11 @@ export default function VideoCanvas({
         onResults={handleFaceMeshResults}
         showOverlay={showOverlay}
         fps={10}
+        videoClassName={videoClassName}
       />
 
       {/* AU telemetry display */}
-      {latestAUs && (
+      {showStats && latestAUs && (
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg bg-qace-surface px-3 py-2 text-xs text-qace-muted">
           <div className="flex justify-between gap-2">
             <span>Brow</span>

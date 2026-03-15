@@ -1,10 +1,21 @@
 import type { Metadata } from "next";
+import { Manrope, Sora } from "next/font/google";
 import "./globals.css";
 
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-body",
+});
+
+const sora = Sora({
+  subsets: ["latin"],
+  variable: "--font-heading",
+});
+
 export const metadata: Metadata = {
-  title: "Q&Ace — AI Interview Prep",
+  title: "Q&Ace | AI Interview Coach",
   description:
-    "Real-time AI interview preparation with speech analysis and avatar feedback",
+    "Real-time interview preparation with AI coaching, multimodal feedback, and performance analytics.",
 };
 
 export default function RootLayout({
@@ -14,7 +25,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-qace-dark text-qace-text antialiased">
+      <body
+        className={`${manrope.variable} ${sora.variable} min-h-screen bg-qace-dark text-qace-text antialiased`}
+      >
         {children}
       </body>
     </html>

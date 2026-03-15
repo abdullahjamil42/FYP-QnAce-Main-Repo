@@ -127,3 +127,31 @@ npx playwright test
 - If browser audio fails, allow microphone permissions and use localhost.
 - If model loading fails, verify model paths in `.env`.
 - If dependency conflicts appear, run `pip check` and reinstall from `server/requirements.txt`.
+
+## 10. Supabase Integration (Auth + Session Storage)
+
+The frontend now supports Supabase authentication and interview session persistence.
+
+### 10.1 Add frontend env file
+
+Create `client/.env.local`:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_public_anon_key
+
+# Optional, defaults to http://<host>:8000
+NEXT_PUBLIC_QACE_API_URL=http://localhost:8000
+```
+
+### 10.2 Create DB table and RLS policies
+
+Run the SQL script in Supabase SQL editor:
+
+- `docs/supabase_schema.sql`
+
+This creates:
+
+- `public.interview_sessions`
+- indexes for timeline queries
+- row-level security policies so users only access their own sessions

@@ -25,6 +25,7 @@ FACE_ONNX = MODELS_DIR / "face-emotion" / "efficientnet_b2.onnx"
 BERT_ONNX = MODELS_DIR / "text-quality" / "bert_quality.onnx"
 
 OLD_QNACE_ROOT = Path(r"C:\22i-2451\QAce\FYP-QnAce-Main-Repo")
+LOCAL_BERT_DIR = REPO_ROOT / "BERT_Model"
 OLD_BERT_DIR = OLD_QNACE_ROOT / "BERT_Model"
 
 FACE_HF_REPO = "abdullahjamil42/QnAce-Face-Model"
@@ -117,8 +118,7 @@ def export_bert_onnx() -> None:
         print(f"✓ BERT ONNX already present: {BERT_ONNX}")
         return
 
-    if not OLD_BERT_DIR.exists():
-        raise FileNotFoundError(f"Local BERT model folder not found: {OLD_BERT_DIR}")
+    bert_dir = LOCAL_BERT_DIR if LOCAL_BERT_DIR.exists() else OLD_BERT_DIR
 
     print("↓ Exporting BERT text-quality model to ONNX …")
     ensure_dir(BERT_ONNX.parent)
@@ -126,8 +126,26 @@ def export_bert_onnx() -> None:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-    model = AutoModelForSequenceClassification.from_pretrained(str(OLD_BERT_DIR))
-    tokenizer = AutoTokenizer.from_pretrained(str(OLD_BERT_DIR))
+    # Prefer local fine-tuned checkpoint. If absent/incomplete, fall back to
+    # a base BERT classifier so runtime has a working model object.
+    model = None
+    tokenizer = None
+    if bert_dir.exists():
+        try:
+            model = AutoModelForSequenceClassification.from_pretrained(str(bert_dir))
+            tokenizer = AutoTokenizer.from_pretrained(str(bert_dir))
+            print(f"  ℹ Using local BERT checkpoint: {bert_dir}")
+        except Exception as exc:
+            print(f"  ! Local BERT checkpoint unusable ({exc}); falling back to bert-base-uncased")
+
+    if model is None or tokenizer is None:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            "bert-base-uncased",
+            num_labels=3,
+            ignore_mismatched_sizes=True,
+        )
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        print("  ℹ Fallback BERT exported from bert-base-uncased (generic 3-label head)")
     model.eval()
 
     sample = tokenizer(
@@ -155,8 +173,8 @@ def export_bert_onnx() -> None:
 
     # Keep tokenizer/config files near the ONNX model for optional direct use.
     for name in ["config.json", "tokenizer_config.json", "special_tokens_map.json", "vocab.txt"]:
-        src = OLD_BERT_DIR / name
-        if src.exists():
+        src = bert_dir / name
+        if bert_dir.exists() and src.exists():
             shutil.copy2(src, BERT_ONNX.parent / name)
 
     print(f"✓ BERT ONNX exported: {BERT_ONNX}")

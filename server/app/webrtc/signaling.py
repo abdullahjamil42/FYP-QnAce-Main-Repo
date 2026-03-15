@@ -662,6 +662,10 @@ async def handle_offer(req: OfferRequest):
         if channel.label == "qace-events":
             session["data_channel"] = channel
             send_status(channel, "server-datachannel-ready")
+            avatar_eng = session.get("avatar_engine")
+            avatar_engine_name = getattr(avatar_eng, "engine_name", "none") if avatar_eng is not None else "none"
+            send_status(channel, f"avatar-engine: {avatar_engine_name}")
+            send_status(channel, f"avatar-image: {settings.avatar_image}")
 
             if not session.get("interview_started", False):
                 session["interview_started"] = True
