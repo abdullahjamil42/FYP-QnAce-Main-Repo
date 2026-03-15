@@ -7,7 +7,7 @@ type CardProps = {
 
 export function GlassCard({ children, className = "" }: CardProps) {
   return (
-    <article className={`rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl shadow-black/20 ${className}`}>
+    <article className={`liquid-card rounded-2xl border border-white/20 p-5 shadow-xl shadow-black/25 backdrop-blur-md ${className}`}>
       {children}
     </article>
   );

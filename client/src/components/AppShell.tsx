@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
+import BrandLogo from "@/components/BrandLogo";
 
 type AppShellProps = {
   title: string;
@@ -95,14 +96,17 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-qace-dark text-qace-text">
-      <div className="pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-qace-primary/20 blur-3xl" />
-      <div className="pointer-events-none absolute -right-20 top-32 h-72 w-72 rounded-full bg-qace-accent/20 blur-3xl" />
+    <div className="app-liquid-page relative min-h-screen overflow-hidden text-qace-text">
+      <div className="app-liquid-bg" />
+      <div className="app-liquid-noise" />
 
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-qace-dark/80 backdrop-blur-xl">
+      <div className="shell-corner-glow-a pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-qace-primary/20 blur-3xl" />
+      <div className="shell-corner-glow-b pointer-events-none absolute -right-20 top-32 h-72 w-72 rounded-full bg-qace-accent/20 blur-3xl" />
+
+      <header className="app-frosted sticky top-0 z-20 border-b">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-4 md:px-8">
-          <Link href="/" className="text-xl font-semibold tracking-tight">
-            Q&<span className="text-qace-accent">Ace</span>
+          <Link href="/" className="flex items-center">
+            <BrandLogo className="h-8 w-auto text-white" />
           </Link>
           <nav className="hidden items-center gap-2 md:flex">
             {navItems.map((item) => (
@@ -111,7 +115,7 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
                 href={item.href}
                 className={`rounded-full px-3 py-1.5 text-sm transition ${
                   isActive(pathname, item.href)
-                    ? "bg-white/15 text-white"
+                    ? "app-frosted-soft text-white"
                     : "text-qace-muted hover:bg-white/10 hover:text-white"
                 }`}
               >
@@ -123,7 +127,7 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
             <div className="relative">
               <button
                 onClick={() => setMenuOpen((open) => !open)}
-                className="flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-2 py-1.5 text-sm text-white transition hover:bg-white/10"
+                className="app-frosted-soft flex items-center gap-2 rounded-full px-2 py-1.5 text-sm text-white transition hover:bg-white/12"
               >
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-qace-primary text-xs font-semibold text-white">
                   {initials}
@@ -131,7 +135,7 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
                 <span className="max-w-28 truncate pr-2">{profileLabel}</span>
               </button>
               {menuOpen ? (
-                <div className="absolute right-0 top-12 w-56 rounded-xl border border-white/15 bg-qace-dark/95 p-2 shadow-xl shadow-black/30">
+                <div className="app-frosted absolute right-0 top-12 w-56 rounded-xl p-2">
                   <p className="px-2 py-1 text-xs text-qace-muted">Signed in as</p>
                   <p className="truncate px-2 pb-2 text-sm text-white">{user.email}</p>
                   <button
@@ -146,7 +150,7 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
           ) : (
             <Link
               href="/login"
-              className="rounded-full bg-qace-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-400"
+              className="app-frosted-soft rounded-full px-4 py-2 text-sm font-medium text-white transition hover:bg-white/12"
             >
               Login
             </Link>
@@ -160,7 +164,7 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
                 href={item.href}
                 className={`rounded-full px-3 py-1.5 text-sm transition ${
                   isActive(pathname, item.href)
-                    ? "bg-white/15 text-white"
+                    ? "app-frosted-soft text-white"
                     : "text-qace-muted hover:bg-white/10 hover:text-white"
                 }`}
               >
