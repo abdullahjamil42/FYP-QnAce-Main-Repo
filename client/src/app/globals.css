@@ -213,13 +213,13 @@ h6 {
 @keyframes shellCornerPulseA {
   0%,
   100% {
-    opacity: 0.4;
+    opacity: 0.2;
     filter: blur(88px);
     transform: scale(1);
   }
   50% {
-    opacity: 1;
-    filter: blur(44px);
+    opacity: 0.5;
+    filter: blur(80px);
     transform: scale(1.05);
   }
 }
@@ -227,13 +227,13 @@ h6 {
 @keyframes shellCornerPulseB {
   0%,
   100% {
-    opacity: 0.4;
-    filter: blur(60px);
+    opacity: 0.2;
+    filter: blur(88px);
     transform: scale(1);
   }
   50% {
-    opacity: 1;
-    filter: blur(60px);
+    opacity: 0.5;
+    filter: blur(80px);
     transform: scale(1.05);
   }
 }

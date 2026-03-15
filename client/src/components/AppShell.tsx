@@ -100,8 +100,8 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
       <div className="app-liquid-bg" />
       <div className="app-liquid-noise" />
 
-      <div className="shell-corner-glow-a pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-qace-primary/20 blur-3xl" />
-      <div className="shell-corner-glow-b pointer-events-none absolute -right-20 top-32 h-72 w-72 rounded-full bg-qace-accent/20 blur-3xl" />
+      <div className="shell-corner-glow-a pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-sky-500 blur-3xl" />
+      <div className="shell-corner-glow-b pointer-events-none absolute -right-20 top-32 h-72 w-72 rounded-full bg-purple-500 blur-3xl" />
 
       <header className="app-frosted sticky top-0 z-20 border-b">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-4 md:px-8">
