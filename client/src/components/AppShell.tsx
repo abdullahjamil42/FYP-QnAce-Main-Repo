@@ -98,7 +98,11 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
   return (
     <div className="app-liquid-page relative min-h-screen overflow-hidden text-qace-text">
       <div className="app-liquid-bg" />
+      <div className="app-aurora-drift" />
+      <div className="app-floating-orbs" />
+      <div className="app-starfield" />
       <div className="app-liquid-noise" />
+      <div className="app-vignette-breath" />
 
       <div className="shell-corner-glow-a pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-sky-500 blur-3xl" />
       <div className="shell-corner-glow-b pointer-events-none absolute -right-20 top-32 h-72 w-72 rounded-full bg-purple-500 blur-3xl" />

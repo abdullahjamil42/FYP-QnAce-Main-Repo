@@ -172,14 +172,12 @@ export default function LandingPage() {
             The fastest way to improve is a realistic mock + measurable feedback + immediate retry. This page is designed around that cycle.
           </p>
         </div>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="reveal-stagger-row grid gap-4 md:grid-cols-3">
           {benefitCards.map((card, index) => (
             <article
               key={card.title}
               data-reveal
-              className={`reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-5 shadow-xl shadow-black/20 ${
-                index === 1 ? "reveal-delay-1" : index === 2 ? "reveal-delay-2" : ""
-              }`}
+              className="reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-5 shadow-xl shadow-black/20"
             >
               <h3 className="text-lg font-semibold text-white">{card.title}</h3>
               <p className="mt-2 text-sm text-qace-muted">{card.text}</p>
@@ -193,14 +191,12 @@ export default function LandingPage() {
           <h2 className="text-2xl font-semibold text-white md:text-3xl">Your interview journey</h2>
           <p className="mt-2 text-qace-muted">Scroll through the full workflow before you enter the session room.</p>
         </div>
-        <div className="space-y-4">
+        <div className="reveal-stagger-row space-y-4">
           {journey.map((item, index) => (
             <article
               key={item.title}
               data-reveal
-              className={`reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-6 ${
-                index === 1 ? "reveal-delay-1" : index === 2 ? "reveal-delay-2" : ""
-              }`}
+              className="reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-6"
             >
               <p className="text-xs uppercase tracking-wide text-qace-muted">{item.step}</p>
               <h3 className="mt-2 text-2xl font-semibold text-white">{item.title}</h3>

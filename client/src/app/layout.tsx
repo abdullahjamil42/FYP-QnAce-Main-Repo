@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope, Sora } from "next/font/google";
+import MagneticHoverProvider from "@/components/MagneticHoverProvider";
 import "./globals.css";
 
 const manrope = Manrope({
@@ -28,6 +29,7 @@ export default function RootLayout({
       <body
         className={`${manrope.variable} ${sora.variable} min-h-screen bg-qace-dark text-qace-text antialiased`}
       >
+        <MagneticHoverProvider />
         {children}
       </body>
     </html>
