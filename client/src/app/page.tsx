@@ -94,8 +94,11 @@ export default function LandingPage() {
       <div className="landing-scroll-shade" style={{ opacity: scrollShadeOpacity }} />
 
       <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-6 md:px-8">
-        <Link href="/" className="flex items-center">
+        <Link href="/" className="flex items-center gap-2">
           <BrandLogo className="h-9 w-auto text-white" />
+          <span className="text-xl font-semibold tracking-tight text-white">
+            Q&A<span className="text-sky-400">ce</span>
+          </span>
         </Link>
         <div className="flex items-center gap-2">
           <Link
@@ -113,8 +116,8 @@ export default function LandingPage() {
         </div>
       </header>
 
-      <section className="relative z-10 mx-auto grid w-full max-w-6xl gap-8 px-5 pb-20 pt-8 md:grid-cols-2 md:px-8 md:pt-14">
-        <div data-reveal className="reveal space-y-6">
+      <section className="relative z-10 mx-auto flex min-h-[calc(100vh-80px)] w-full max-w-6xl items-center px-5 pb-8 pt-6 md:px-8 md:pt-10">
+        <div data-reveal className="reveal space-y-6 text-center">
           <p className="inline-flex rounded-full border border-cyan-300/35 px-3 py-1 text-xs font-semibold tracking-wide text-cyan-100">
             AI powered interview coach 
           </p>
@@ -122,10 +125,10 @@ export default function LandingPage() {
             <span className="bg-gradient-to-r from-indigo-300 via-sky-400 to-purple-600 bg-clip-text text-transparent">Master your Interviews</span>{" "}
             <span className="text-white">with AI-Powered Mocks and Feedback</span>
           </h1>
-          <p className="max-w-xl text-base text-qace-muted md:text-lg">
+          <p className="mx-auto max-w-xl text-base text-qace-muted md:text-lg">
             Get multimodal feedback on your interview performance, track your progress over time, and practice with an AI interviewer that feels real.
           </p>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap justify-center gap-3">
             <Link
               href="/setup"
               className="rounded-full bg-qace-primary px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:-translate-y-0.5 hover:bg-indigo-400"
@@ -141,14 +144,14 @@ export default function LandingPage() {
           </div>
         </div>
 
-        <div data-reveal className="reveal reveal-delay-1">
-          <div className="liquid-card panel-tilt relative overflow-hidden rounded-3xl border border-white/20 p-6 backdrop-blur-md">
+       {/*<div data-reveal className="reveal reveal-delay-1">
+          <div className="card-glow panel-tilt relative overflow-hidden rounded-3xl border border-white/20 bg-white/5 p-6 backdrop-blur-md">
             <div className="mb-5 flex items-center justify-between text-white">
               <p className="text-sm text-qace-muted">Meeting Snapshot</p>
               <span className="rounded-full bg-emerald-500/25 px-2 py-1 text-xs text-emerald-200">AI live</span>
             </div>
             <div className="space-y-4">
-              <InfoRow label="Content Quality" value="86 / 100" />
+              <InfoRow label="Conte nt Quality" value="86 / 100" />
               <InfoRow label="Delivery" value="79 / 100" />
               <InfoRow label="Composure" value="81 / 100" />
             </div>
@@ -159,7 +162,7 @@ export default function LandingPage() {
               </p>
             </div>
           </div>
-        </div>
+        </div>*/}
       </section>
 
       <section className="relative z-10 mx-auto w-full max-w-6xl space-y-5 px-5 pb-14 md:px-8">
@@ -174,7 +177,7 @@ export default function LandingPage() {
             <article
               key={card.title}
               data-reveal
-              className={`reveal liquid-card rounded-2xl border border-white/20 p-5 shadow-xl shadow-black/20 ${
+              className={`reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-5 shadow-xl shadow-black/20 ${
                 index === 1 ? "reveal-delay-1" : index === 2 ? "reveal-delay-2" : ""
               }`}
             >
@@ -195,7 +198,7 @@ export default function LandingPage() {
             <article
               key={item.title}
               data-reveal
-              className={`reveal liquid-card rounded-2xl border border-white/20 p-6 ${
+              className={`reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-6 ${
                 index === 1 ? "reveal-delay-1" : index === 2 ? "reveal-delay-2" : ""
               }`}
             >
@@ -208,7 +211,7 @@ export default function LandingPage() {
       </section>
 
       <section className="relative z-10 mx-auto w-full max-w-6xl px-5 pb-28 md:px-8">
-        <div data-reveal className="reveal liquid-card rounded-3xl border border-white/25 p-8 text-center">
+        <div data-reveal className="reveal card-glow rounded-3xl border border-white/25 bg-white/5 p-8 text-center">
           <p className="text-xs uppercase tracking-[0.2em] text-qace-muted">Ready for your next interview?</p>
           <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">Launch your AI mock interview now.</h2>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
@@ -227,7 +230,7 @@ export default function LandingPage() {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/15 bg-black/20 p-3">
+    <div className="card-glow rounded-xl border border-white/15 bg-black/20 p-3">
       <p className="text-xs uppercase tracking-wide text-qace-muted">{label}</p>
       <p className="mt-1 text-lg font-semibold text-white">{value}</p>
     </div>

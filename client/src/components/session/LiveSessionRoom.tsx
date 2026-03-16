@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDataChannel } from "@/hooks/useDataChannel";
 import { useWebRTC } from "@/hooks/useWebRTC";
@@ -18,13 +18,18 @@ export default function LiveSessionRoom() {
     webcamStream,
     remoteAudioStream,
     remoteVideoStream,
+    isMicEnabled,
+    isCamEnabled,
+    toggleMic,
+    toggleCam,
     start,
     stop,
     addVideoTrack,
   } = useWebRTC();
-  const { transcripts, scores, perception, statusLog, sendAUTelemetry } = useDataChannel(dataChannel, auChannel);
+  const { transcripts, scores, perception, statusLog, clearTranscripts, sendAUTelemetry } = useDataChannel(dataChannel, auChannel);
   const startedAtRef = useRef<string | null>(null);
   const isSavingRef = useRef(false);
+  const [showTranscriptPanel, setShowTranscriptPanel] = useState(true);
 
   const isConnected = state === "connected";
   const isConnecting = state === "connecting";
@@ -83,11 +88,18 @@ export default function LiveSessionRoom() {
   }, [state]);
 
   const handleStart = useCallback(() => {
+    clearTranscripts();
     if (!startedAtRef.current) {
       startedAtRef.current = new Date().toISOString();
     }
     void start();
-  }, [start]);
+  }, [clearTranscripts, start]);
+
+  const handleDropCall = useCallback(() => {
+    stop();
+    clearTranscripts();
+    startedAtRef.current = null;
+  }, [clearTranscripts, stop]);
 
   const handleStopAndSave = useCallback(async () => {
     if (isSavingRef.current) {
@@ -125,7 +137,7 @@ export default function LiveSessionRoom() {
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#0b1225] via-[#0d152d] to-[#091024] p-4 text-qace-text lg:p-6">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/5 px-4 py-3 shadow-xl shadow-black/20">
+      <header className="card-glow mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/5 px-4 py-3 shadow-xl shadow-black/20">
         <div>
           <p className="text-xs uppercase tracking-wide text-qace-muted">Q&Ace Live Interview Room</p>
           <h1 className="text-xl font-semibold">Frontend Developer Mock Interview</h1>
@@ -155,7 +167,7 @@ export default function LiveSessionRoom() {
 
       <div className="grid gap-4 lg:grid-cols-12">
         <section className="lg:col-span-8">
-          <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-[#12182a] p-3 shadow-2xl shadow-black/35">
+          <div className="card-glow relative overflow-hidden rounded-3xl border border-white/20 bg-[#12182a] p-3 shadow-2xl shadow-black/35">
             <div className="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full bg-black/45 px-3 py-1 text-xs">
               <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-red-400 animate-pulse" : "bg-slate-400"}`} />
               <span>{isConnected ? "Live Recording" : "Not Connected"}</span>
@@ -177,7 +189,7 @@ export default function LiveSessionRoom() {
               <div className="flex h-[420px] w-full items-center justify-center rounded-2xl bg-qace-surface text-6xl">📷</div>
             )}
 
-            <div className="absolute right-6 top-6 z-10 w-52 overflow-hidden rounded-2xl border border-white/20 bg-black/30 backdrop-blur-sm">
+            <div className="card-glow absolute right-6 top-6 z-10 w-52 overflow-hidden rounded-2xl border border-white/20 bg-black/30 backdrop-blur-sm">
               {remoteVideoStream ? (
                 <video ref={avatarVideoRef} autoPlay playsInline muted className="h-32 w-full object-cover" />
               ) : (
@@ -189,13 +201,44 @@ export default function LiveSessionRoom() {
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/20 bg-black/25 px-3 py-3">
+            <div className="card-glow mt-3 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/20 bg-black/25 px-3 py-3">
               <button
                 onClick={handleStart}
                 disabled={isConnected || isConnecting}
                 className="rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:opacity-40"
               >
                 {isConnecting ? "Connecting..." : "Join Interview"}
+              </button>
+              <button
+                onClick={toggleMic}
+                disabled={!isConnected}
+                className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition disabled:opacity-40 ${
+                  isMicEnabled ? "bg-slate-700 hover:bg-slate-600" : "bg-amber-600 hover:bg-amber-500"
+                }`}
+              >
+                {isMicEnabled ? "Mic On" : "Mic Off"}
+              </button>
+              <button
+                onClick={toggleCam}
+                disabled={!isConnected || !webcamStream}
+                className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition disabled:opacity-40 ${
+                  isCamEnabled ? "bg-slate-700 hover:bg-slate-600" : "bg-amber-600 hover:bg-amber-500"
+                }`}
+              >
+                {isCamEnabled ? "Cam On" : "Cam Off"}
+              </button>
+              <button
+                onClick={() => setShowTranscriptPanel((prev) => !prev)}
+                className="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+              >
+                {showTranscriptPanel ? "Hide Transcript" : "Show Transcript"}
+              </button>
+              <button
+                onClick={handleDropCall}
+                disabled={!isConnected}
+                className="rounded-full bg-rose-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-rose-500 disabled:opacity-40"
+              >
+                Drop Call
               </button>
               <button
                 onClick={handleStopAndSave}
@@ -209,7 +252,7 @@ export default function LiveSessionRoom() {
         </section>
 
         <aside className="space-y-4 lg:col-span-4">
-          <section className="rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
+          <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-semibold">Interview Intelligence</h2>
               <span className="rounded-full bg-qace-primary/20 px-2 py-1 text-xs text-indigo-200">AI Analysis</span>
@@ -219,7 +262,7 @@ export default function LiveSessionRoom() {
                 <ScoreRow label="Content" value={scores.content} />
                 <ScoreRow label="Delivery" value={scores.delivery} />
                 <ScoreRow label="Composure" value={scores.composure} />
-                <div className="rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-center">
+                <div className="card-glow rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-center">
                   <div className="text-3xl font-semibold text-qace-accent">{scores.final.toFixed(1)}</div>
                   <div className="text-xs text-qace-muted">Overall Score</div>
                 </div>
@@ -229,11 +272,11 @@ export default function LiveSessionRoom() {
             )}
           </section>
 
-          <section className="rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
+          <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
             <h2 className="mb-3 text-base font-semibold">Question Queue</h2>
             <div className="space-y-2 text-sm">
               {["Tell me about yourself.", "How would you optimize a React app?", "How do you structure reusable components?", "How do you handle API failure states?"].map((question, idx) => (
-                <div key={question} className={`rounded-xl border px-3 py-2 ${idx === 0 ? "border-emerald-300/40 bg-emerald-400/10" : "border-white/20 bg-black/20"}`}>
+                <div key={question} className={`rounded-xl border px-3 py-2 ${idx === 0 ? "border-emerald-300/40 bg-emerald-400/10" : "card-glow border-white/20 bg-black/20"}`}>
                   <p className="text-xs text-qace-muted">Q{idx + 1}</p>
                   <p>{question}</p>
                 </div>
@@ -241,30 +284,32 @@ export default function LiveSessionRoom() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
-            <h2 className="mb-2 text-base font-semibold">Live Notes</h2>
-            <div className="max-h-44 space-y-2 overflow-y-auto pr-1 text-sm">
-              {transcripts.length === 0 ? (
-                <p className="italic text-qace-muted">Transcript snippets will appear here during your answer.</p>
-              ) : (
-                transcripts.slice(-3).map((t, i) => (
-                  <div key={i} className="rounded-lg bg-black/25 p-2.5">
-                    <p>{t.text}</p>
-                    <p className="mt-1 text-xs text-qace-muted">{t.wpm} WPM · {t.filler_count} fillers</p>
-                  </div>
-                ))
-              )}
-            </div>
-            {perception ? (
-              <div className="mt-3 rounded-xl border border-white/20 bg-black/25 p-3 text-xs text-qace-muted">
-                <p>Emotion: <span className="capitalize text-white">{perception.vocal_emotion}</span></p>
-                <p>Face: <span className="capitalize text-white">{perception.face_emotion}</span></p>
-                <p>Text: <span className="capitalize text-white">{perception.text_quality_label}</span></p>
+          {showTranscriptPanel ? (
+            <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
+              <h2 className="mb-2 text-base font-semibold">Transcript</h2>
+              <div className="max-h-44 space-y-2 overflow-y-auto pr-1 text-sm">
+                {transcripts.length === 0 ? (
+                  <p className="italic text-qace-muted">Transcript snippets will appear here during your answer.</p>
+                ) : (
+                  transcripts.slice(-12).map((t, i) => (
+                    <div key={i} className="rounded-lg bg-black/25 p-2.5">
+                      <p>{t.text}</p>
+                      <p className="mt-1 text-xs text-qace-muted">{t.wpm} WPM · {t.filler_count} fillers</p>
+                    </div>
+                  ))
+                )}
               </div>
-            ) : null}
-          </section>
+              {perception ? (
+                <div className="card-glow mt-3 rounded-xl border border-white/20 bg-black/25 p-3 text-xs text-qace-muted">
+                  <p>Emotion: <span className="capitalize text-white">{perception.vocal_emotion}</span></p>
+                  <p>Face: <span className="capitalize text-white">{perception.face_emotion}</span></p>
+                  <p>Text: <span className="capitalize text-white">{perception.text_quality_label}</span></p>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
-          <section className="rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
+          <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
             <h2 className="mb-2 text-base font-semibold">System Timeline</h2>
             <div className="max-h-28 space-y-1 overflow-y-auto font-mono text-xs text-qace-muted">
               {statusLog.length === 0 ? <p>No events yet.</p> : statusLog.slice(-6).map((entry, i) => <p key={i}>{entry}</p>)}

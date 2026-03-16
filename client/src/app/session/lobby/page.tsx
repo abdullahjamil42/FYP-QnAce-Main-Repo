@@ -71,7 +71,7 @@ export default function SessionLobbyPage() {
             ))}
           </div>
 
-          <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-3 text-sm">
+          <div className="card-glow mt-5 rounded-xl border border-white/10 bg-black/20 p-3 text-sm">
             <p className="text-xs uppercase tracking-wide text-qace-muted">Session Setup</p>
             <p className="mt-2 text-qace-muted">Mode: <span className="text-white capitalize">{setup.mode}</span></p>
             <p className="text-qace-muted">Difficulty: <span className="text-white">{setup.difficulty}</span></p>
@@ -90,7 +90,7 @@ export default function SessionLobbyPage() {
           <div className="mt-5 rounded-xl border border-qace-accent/30 bg-qace-accent/10 p-3 text-sm text-qace-text">
             Expected latency budget: under 800ms per turn in normal network conditions.
           </div>
-          <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-qace-muted">
+          <div className="card-glow mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-qace-muted">
             <div className="mb-2 flex items-center justify-between">
               <span>Backend Status</span>
               <Badge tone={healthState === "online" ? "success" : "warning"}>

@@ -10,7 +10,7 @@ module.exports = {
       colors: {
         qace: {
           dark: '#0f172a',
-          primary: '#6366f1',
+          primary: '#38bdf8',
           accent: '#22d3ee',
           surface: '#1e293b',
           text: '#f1f5f9',

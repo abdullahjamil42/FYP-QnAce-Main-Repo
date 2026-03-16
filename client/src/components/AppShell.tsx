@@ -102,20 +102,25 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
 
       <div className="shell-corner-glow-a pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-sky-500 blur-3xl" />
       <div className="shell-corner-glow-b pointer-events-none absolute -right-20 top-32 h-72 w-72 rounded-full bg-purple-500 blur-3xl" />
+      <div className="shell-corner-glow-a pointer-events-none absolute -bottom-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-sky-400 blur-3xl" />
 
-      <header className="app-frosted sticky top-0 z-20 border-b">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-4 md:px-8">
-          <Link href="/" className="flex items-center">
+      <header className="sticky top-0 z-20">
+        <div className="mx-auto grid w-full max-w-[92rem] grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-4 sm:px-5 md:px-8">
+          <Link href="/" className="justify-self-start flex items-center gap-2">
             <BrandLogo className="h-8 w-auto text-white" />
+            <span className="text-xl font-semibold tracking-tight text-white">
+              Q&A<span className="text-sky-400">ce</span>
+            </span>
           </Link>
-          <nav className="hidden items-center gap-2 md:flex">
+
+          <nav className="justify-self-center flex max-w-[56vw] items-center gap-1 overflow-x-auto rounded-full border border-white/20 bg-white/10 px-2 py-1 backdrop-blur-md">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`rounded-full px-3 py-1.5 text-sm transition ${
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition ${
                   isActive(pathname, item.href)
-                    ? "app-frosted-soft text-white"
+                    ? "bg-white/18 text-white"
                     : "text-qace-muted hover:bg-white/10 hover:text-white"
                 }`}
               >
@@ -123,11 +128,12 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
               </Link>
             ))}
           </nav>
+
           {user ? (
-            <div className="relative">
+            <div className="relative justify-self-end">
               <button
                 onClick={() => setMenuOpen((open) => !open)}
-                className="app-frosted-soft flex items-center gap-2 rounded-full px-2 py-1.5 text-sm text-white transition hover:bg-white/12"
+                className="flex items-center gap-2 rounded-full px-2 py-1.5 text-sm text-white transition hover:text-sky-200"
               >
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-qace-primary text-xs font-semibold text-white">
                   {initials}
@@ -150,32 +156,15 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
           ) : (
             <Link
               href="/login"
-              className="app-frosted-soft rounded-full px-4 py-2 text-sm font-medium text-white transition hover:bg-white/12"
+              className="justify-self-end rounded-full px-4 py-2 text-sm font-medium text-white transition hover:text-sky-200"
             >
               Login
             </Link>
           )}
         </div>
-        <div className="mx-auto w-full max-w-7xl overflow-x-auto px-4 pb-3 md:hidden md:px-8">
-          <nav className="flex min-w-max items-center gap-2">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`rounded-full px-3 py-1.5 text-sm transition ${
-                  isActive(pathname, item.href)
-                    ? "app-frosted-soft text-white"
-                    : "text-qace-muted hover:bg-white/10 hover:text-white"
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-        </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-7xl px-4 py-10 md:px-8 md:py-12">
+      <main className="relative z-10 mx-auto w-full max-w-[92rem] px-3 py-10 sm:px-5 md:px-8 md:py-12">
         <section className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div className="space-y-2">
             <h1 className="animate-fade-up text-3xl font-semibold md:text-4xl">{title}</h1>

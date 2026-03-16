@@ -169,6 +169,37 @@ h6 {
   box-shadow: 0 12px 32px rgba(2, 6, 23, 0.35);
 }
 
+.card-glow {
+  box-shadow:
+    0 10px 28px rgba(2, 6, 23, 0.34),
+    0 0 0 1px rgba(148, 163, 184, 0.06),
+    0 0 18px rgba(56, 189, 248, 0.1);
+  transition: box-shadow 200ms ease;
+}
+
+.card-glow:hover {
+  box-shadow:
+    0 12px 32px rgba(2, 6, 23, 0.6),
+    0 0 0 1px rgba(148, 163, 184, 0.62),
+    0 0 24px rgba(56, 189, 248, 0.34);
+}
+
+a[class*="rounded"][class*="bg-"],
+button[class*="rounded"][class*="bg-"] {
+  transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+a[class*="rounded"][class*="bg-"]:hover,
+button[class*="rounded"][class*="bg-"]:hover {
+  background-color: rgb(56 189 248 / 0.9) !important;
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.42), 0 0 20px rgba(56, 189, 248, 0.35);
+}
+
+button[class*="rounded"][class*="bg-"]:disabled,
+button[class*="rounded"][class*="bg-"][aria-disabled="true"] {
+  box-shadow: none;
+}
+
 .app-liquid-page {
   background: linear-gradient(140deg, #06102a 0%, #0a1738 48%, #0d2148 100%);
 }

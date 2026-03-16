@@ -38,6 +38,8 @@ export function useWebRTC() {
   const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
   const [remoteAudioStream, setRemoteAudioStream] = useState<MediaStream | null>(null);
   const [remoteVideoStream, setRemoteVideoStream] = useState<MediaStream | null>(null);
+  const [isMicEnabled, setIsMicEnabled] = useState(true);
+  const [isCamEnabled, setIsCamEnabled] = useState(true);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -57,6 +59,26 @@ export function useWebRTC() {
     }
   }, []);
 
+  const toggleMic = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    const next = !isMicEnabled;
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = next;
+    });
+    setIsMicEnabled(next);
+  }, [isMicEnabled]);
+
+  const toggleCam = useCallback(() => {
+    const stream = webcamRef.current;
+    if (!stream) return;
+    const next = !isCamEnabled;
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = next;
+    });
+    setIsCamEnabled(next);
+  }, [isCamEnabled]);
+
   // ── Start session ──
   const start = useCallback(async () => {
     setState("connecting");
@@ -73,6 +95,7 @@ export function useWebRTC() {
         video: false,
       });
       streamRef.current = audioStream;
+      setIsMicEnabled(audioStream.getAudioTracks().some((track) => track.enabled));
 
       // Also capture webcam for face mesh (separate stream)
       try {
@@ -87,8 +110,10 @@ export function useWebRTC() {
         });
         webcamRef.current = videoStream;
         setWebcamStream(videoStream);
+        setIsCamEnabled(videoStream.getVideoTracks().some((track) => track.enabled));
       } catch {
         console.warn("Webcam not available — face analysis disabled");
+        setIsCamEnabled(false);
       }
 
       // 2. Create RTCPeerConnection
@@ -211,6 +236,8 @@ export function useWebRTC() {
     setWebcamStream(null);
     setRemoteAudioStream(null);
     setRemoteVideoStream(null);
+    setIsMicEnabled(true);
+    setIsCamEnabled(true);
   }
 
   return {
@@ -222,6 +249,10 @@ export function useWebRTC() {
     webcamStream,
     remoteAudioStream,
     remoteVideoStream,
+    isMicEnabled,
+    isCamEnabled,
+    toggleMic,
+    toggleCam,
     start,
     stop,
     addVideoTrack,
