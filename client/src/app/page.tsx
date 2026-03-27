@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import InteractiveNetworkBg from "@/components/InteractiveNetworkBg";
 import BrandLogo from "@/components/BrandLogo";
+import { getSupabaseClient } from "@/lib/supabase";
 
 const benefitCards = [
   {
@@ -40,6 +42,54 @@ const journey = [
 
 export default function LandingPage() {
   const [scrollShadeOpacity, setScrollShadeOpacity] = useState(0);
+  const [user, setUser] = useState<User | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const profileLabel = useMemo(() => {
+    const fullName = user?.user_metadata?.full_name;
+    if (typeof fullName === "string" && fullName.trim()) {
+      return fullName;
+    }
+    return user?.email ?? "Profile";
+  }, [user]);
+
+  const initials = useMemo(() => {
+    const base = profileLabel.trim();
+    if (!base) {
+      return "U";
+    }
+    const parts = base.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+  }, [profileLabel]);
+
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client) {
+      return;
+    }
+
+    let mounted = true;
+
+    client.auth.getUser().then(({ data }) => {
+      if (mounted) {
+        setUser(data.user ?? null);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]"));
@@ -86,6 +136,15 @@ export default function LandingPage() {
     };
   }, []);
 
+  async function handleSignOut() {
+    const client = getSupabaseClient();
+    if (!client) {
+      return;
+    }
+    await client.auth.signOut();
+    setMenuOpen(false);
+  }
+
   return (
     <main className="liquid-page relative min-h-screen overflow-x-hidden text-qace-text">
       <InteractiveNetworkBg />
@@ -100,20 +159,46 @@ export default function LandingPage() {
             Q&A<span className="text-sky-400">ce</span>
           </span>
         </Link>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/login"
-            className="rounded-full border border-white/25 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
-          >
-            Login
-          </Link>
-          <Link
-            href="/signup"
-            className="rounded-full bg-qace-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
-          >
-            Signup
-          </Link>
-        </div>
+        {user ? (
+          <div className="relative flex items-center gap-2">
+            <button
+              onClick={() => setMenuOpen((open) => !open)}
+              className="flex items-center gap-2 rounded-full px-2 py-1.5 text-sm text-white transition hover:text-sky-200"
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-qace-primary text-xs font-semibold text-white">
+                {initials}
+              </span>
+              <span className="max-w-28 truncate pr-2">{profileLabel}</span>
+            </button>
+            {menuOpen ? (
+              <div className="app-frosted absolute right-0 top-12 w-56 rounded-xl p-2">
+                <p className="px-2 py-1 text-xs text-qace-muted">Signed in as</p>
+                <p className="truncate px-2 pb-2 text-sm text-white">{user.email}</p>
+                <button
+                  onClick={handleSignOut}
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-200 transition hover:bg-red-500/20"
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Link
+              href="/login"
+              className="rounded-full border border-white/25 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+            >
+              Login
+            </Link>
+            <Link
+              href="/signup"
+              className="rounded-full bg-qace-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
+            >
+              Signup
+            </Link>
+          </div>
+        )}
       </header>
 
       <section className="relative z-10 mx-auto flex min-h-[calc(100vh-80px)] w-full max-w-6xl items-center px-5 pb-8 pt-6 md:px-8 md:pt-10">
