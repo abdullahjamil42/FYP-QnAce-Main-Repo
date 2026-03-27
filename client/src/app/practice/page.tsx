@@ -17,6 +17,7 @@ import {
 } from "@/lib/mcq-progress-store";
 
 const QUESTIONS_PER_RUN = 4;
+const MIXED_TOPIC_ID = "__mixed__";
 
 function cleanQuestionPrompt(prompt: string): string {
   return prompt.replace(/^\[[^\]]+\]\s*/, "").trim();
@@ -210,12 +211,23 @@ export default function PracticePage() {
     setQuizState("running");
   }
 
-  const selectedCatalogTopic = selectedCatalogTopicId
-    ? catalogTopics.find((topic) => topic.id === selectedCatalogTopicId) ?? null
-    : null;
+  const selectedCatalogTopic = useMemo(() => {
+    if (!selectedCatalogTopicId) {
+      return null;
+    }
+    if (selectedCatalogTopicId === MIXED_TOPIC_ID) {
+      return {
+        id: MIXED_TOPIC_ID,
+        title: "Mixed Topics",
+        subtopicCount: catalogTopics.length,
+        defaultQuestions: 1000,
+      };
+    }
+    return catalogTopics.find((topic) => topic.id === selectedCatalogTopicId) ?? null;
+  }, [catalogTopics, selectedCatalogTopicId]);
 
   const selectedTopicSubtopics = useMemo(() => {
-    if (!selectedCatalogTopicId) {
+    if (!selectedCatalogTopicId || selectedCatalogTopicId === MIXED_TOPIC_ID) {
       return [] as string[];
     }
     return catalogSubtopics
@@ -248,29 +260,39 @@ export default function PracticePage() {
       {quizState === "topic-selection" ? (
         <>
           <GlassCard className="mt-6 animate-fade-up">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold">Topic Catalog</h3>
-              <Badge>{catalogTopics.length} topics</Badge>
-            </div>
-            <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-              {catalogTopics.length === 0 ? (
-                <p className="text-sm text-qace-muted">No catalog records found. Run docs/supabase_schema.sql in Supabase SQL editor first.</p>
-              ) : (
-                catalogTopics.map((topic) => (
+            {catalogTopics.length === 0 ? (
+              <p className="text-sm text-qace-muted">Loading...</p>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-semibold">Topic Catalog</h3>
+                  <Badge>{catalogTopics.length} topics</Badge>
+                </div>
+                <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
                   <button
-                    key={topic.id}
-                    onClick={() => openTopicConfig(topic.id)}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left transition hover:bg-white/10"
+                    onClick={() => openTopicConfig(MIXED_TOPIC_ID)}
+                    className="rounded-lg border border-sky-300/40 bg-sky-500/10 px-3 py-2 text-left transition hover:bg-sky-500/20"
                   >
-                    <p className="text-sm font-semibold text-white">{topic.title}</p>
-                    <p className="text-xs text-qace-muted">{topic.subtopicCount} subtopics</p>
-                    {topicProgressMap.get(topic.id) ? (
-                      <p className="mt-1 text-xs text-qace-muted">Best score: {topicProgressMap.get(topic.id)?.best_score.toFixed(0)}%</p>
-                    ) : null}
+                    <p className="text-sm font-semibold text-white">Mix (All Topics)</p>
+                    <p className="text-xs text-qace-muted">Balanced random mix from all topics</p>
                   </button>
-                ))
-              )}
-            </div>
+                  {catalogTopics.map((topic) => {
+                    const progress = topicProgressMap.get(topic.id);
+                    return (
+                      <button
+                        key={topic.id}
+                        onClick={() => openTopicConfig(topic.id)}
+                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left transition hover:bg-white/10"
+                      >
+                        <p className="text-sm font-semibold text-white">{topic.title}</p>
+                        <p className="text-xs text-qace-muted">{topic.subtopicCount} subtopics</p>
+                        {progress ? <p className="mt-1 text-xs text-qace-muted">Best score: {progress.best_score.toFixed(0)}%</p> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </GlassCard>
 
           {selectedCatalogTopic ? (
@@ -294,12 +316,14 @@ export default function PracticePage() {
 
               <section className="mt-6">
                 <p className="text-sm font-semibold text-white">1. Choose a Topic</p>
-                <input
-                  value={subtopicSearch}
-                  onChange={(event) => setSubtopicSearch(event.target.value)}
-                  placeholder="Search topics..."
-                  className="mt-3 w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-qace-muted outline-none focus:border-sky-300"
-                />
+                {selectedCatalogTopic.id !== MIXED_TOPIC_ID ? (
+                  <input
+                    value={subtopicSearch}
+                    onChange={(event) => setSubtopicSearch(event.target.value)}
+                    placeholder="Search topics..."
+                    className="mt-3 w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-qace-muted outline-none focus:border-sky-300"
+                  />
+                ) : null}
                 <div className="mt-3 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
                   <button
                     onClick={() => setSelectedSubtopic("All Topics")}
@@ -310,7 +334,9 @@ export default function PracticePage() {
                     }`}
                   >
                     <p className="font-semibold">All Topics</p>
-                    <p className="text-xs text-qace-muted">{selectedCatalogTopic.subtopicCount} topics</p>
+                    <p className="text-xs text-qace-muted">
+                      {selectedCatalogTopic.id === MIXED_TOPIC_ID ? "Random across all topics" : `${selectedCatalogTopic.subtopicCount} topics`}
+                    </p>
                   </button>
                   {selectedTopicSubtopics.map((title) => (
                     <button
@@ -456,15 +482,17 @@ export default function PracticePage() {
                 </div>
                 <button
                   onClick={async () => {
+                    const isMixed = selectedCatalogTopic.id === MIXED_TOPIC_ID;
                     const dbQuestions = await fetchQuizQuestions({
-                      topicId: selectedCatalogTopic.id,
-                      subtopic: selectedSubtopic,
+                      topicId: isMixed ? "" : selectedCatalogTopic.id,
+                      subtopic: isMixed ? "All Topics" : selectedSubtopic,
                       difficulty: selectedDifficulty,
                       count: selectedQuestionCount,
+                      mixAcrossTopics: isMixed,
                     });
 
                     if (dbQuestions.length === 0) {
-                      const localCount = getQuestionsForTopic(selectedCatalogTopic.id).length;
+                      const localCount = isMixed ? 0 : getQuestionsForTopic(selectedCatalogTopic.id).length;
                       if (localCount === 0) {
                         setQuizConfigNotice("No questions found for this selection. Import mcq_questions into Supabase and try again.");
                         return;
@@ -472,7 +500,7 @@ export default function PracticePage() {
                       setActiveTopicId(selectedCatalogTopic.id);
                       setLiveQuestions([]);
                     } else {
-                      setActiveTopicId(selectedCatalogTopic.id);
+                      setActiveTopicId(selectedCatalogTopic.id === MIXED_TOPIC_ID ? "mixed-topics" : selectedCatalogTopic.id);
                       setLiveQuestions(dbQuestions);
                     }
 

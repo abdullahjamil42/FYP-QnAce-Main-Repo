@@ -58,10 +58,78 @@ export async function fetchQuizQuestions(params: {
   subtopic: string;
   difficulty: "easy" | "medium" | "hard";
   count: number;
+  mixAcrossTopics?: boolean;
 }): Promise<QuizQuestion[]> {
   const client = getSupabaseClient();
   if (!client) {
     return [];
+  }
+
+  if (params.mixAcrossTopics) {
+    const topicsTable = client.from("mcq_topics" as any) as any;
+    const { data: topics, error: topicError } = await topicsTable.select("id").eq("is_active", true);
+    if (topicError || !Array.isArray(topics) || topics.length === 0) {
+      return [];
+    }
+
+    const topicIds = shuffle(
+      topics
+        .map((topic) => String((topic as { id?: string }).id ?? "").trim())
+        .filter((id) => id.length > 0)
+    );
+    if (topicIds.length === 0) {
+      return [];
+    }
+
+    const basePerTopic = Math.floor(params.count / topicIds.length);
+    let remainder = params.count % topicIds.length;
+    const targetByTopic = new Map<string, number>();
+    for (const topicId of topicIds) {
+      const extra = remainder > 0 ? 1 : 0;
+      if (remainder > 0) {
+        remainder -= 1;
+      }
+      targetByTopic.set(topicId, basePerTopic + extra);
+    }
+
+    const perTopicPoolLimit = Math.max(20, Math.ceil((params.count / topicIds.length) * 5));
+
+    const rowsByTopic = await Promise.all(
+      topicIds.map(async (topicId) => {
+        const table = client.from("mcq_questions" as any) as any;
+        const { data, error } = await table
+          .select("id,topic_id,subtopic_title,difficulty,question,options,answer,explanation")
+          .eq("topic_id", topicId)
+          .eq("difficulty", params.difficulty)
+          .limit(perTopicPoolLimit);
+
+        if (error || !Array.isArray(data)) {
+          return [] as DBMcqQuestion[];
+        }
+
+        return shuffle(data as DBMcqQuestion[]);
+      })
+    );
+
+    const selected: DBMcqQuestion[] = [];
+    const leftovers: DBMcqQuestion[] = [];
+
+    for (let i = 0; i < topicIds.length; i += 1) {
+      const topicRows = rowsByTopic[i] ?? [];
+      const target = targetByTopic.get(topicIds[i]) ?? 0;
+      selected.push(...topicRows.slice(0, target));
+      leftovers.push(...topicRows.slice(target));
+    }
+
+    if (selected.length < params.count) {
+      const selectedIds = new Set(selected.map((row) => row.id));
+      const filler = shuffle(leftovers).filter((row) => !selectedIds.has(row.id));
+      selected.push(...filler.slice(0, params.count - selected.length));
+    }
+
+    return shuffle(selected)
+      .slice(0, params.count)
+      .map(toQuizQuestion);
   }
 
   const table = client.from("mcq_questions" as any) as any;
