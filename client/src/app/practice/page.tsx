@@ -18,6 +18,10 @@ import {
 
 const QUESTIONS_PER_RUN = 4;
 
+function cleanQuestionPrompt(prompt: string): string {
+  return prompt.replace(/^\[[^\]]+\]\s*/, "").trim();
+}
+
 function getFeedback(score: number) {
   if (score >= 85) {
     return "Excellent consistency. Keep increasing question speed while preserving reasoning quality.";
@@ -245,12 +249,9 @@ export default function PracticePage() {
         <>
           <GlassCard className="mt-6 animate-fade-up">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold">Supabase Topic Catalog</h3>
+              <h3 className="text-base font-semibold">Topic Catalog</h3>
               <Badge>{catalogTopics.length} topics</Badge>
             </div>
-            <p className="mt-2 text-sm text-qace-muted">
-              This list is loaded from Supabase tables mcq_topics and mcq_subtopics. The previous hardcoded local cards have been removed.
-            </p>
             <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
               {catalogTopics.length === 0 ? (
                 <p className="text-sm text-qace-muted">No catalog records found. Run docs/supabase_schema.sql in Supabase SQL editor first.</p>
@@ -331,23 +332,27 @@ export default function PracticePage() {
                 <p className="text-sm font-semibold text-white">2. How Many Questions?</p>
                 <div className="mt-3 grid gap-2 md:grid-cols-4">
                   {[10, 20, 30, 50].map((count) => {
-                    const disabled = count >= 30;
                     const active = selectedQuestionCount === count;
                     return (
                       <button
                         key={count}
-                        disabled={disabled}
                         onClick={() => setSelectedQuestionCount(count)}
                         className={`rounded-lg border px-3 py-3 text-center text-sm transition ${
                           active
                             ? "border-sky-300 bg-sky-500/20 text-white"
-                            : disabled
-                              ? "cursor-not-allowed border-white/10 bg-white/5 text-qace-muted/60"
-                              : "border-white/10 bg-white/5 text-qace-muted hover:bg-white/10 hover:text-white"
+                            : "border-white/10 bg-white/5 text-qace-muted hover:bg-white/10 hover:text-white"
                         }`}
                       >
                         <p className="text-2xl font-semibold">{count}</p>
-                        <p>{count === 10 ? "Quick" : count === 20 ? "Standard" : "Coming soon"}</p>
+                        <p>
+                          {count === 10
+                            ? "Quick"
+                            : count === 20
+                              ? "Standard"
+                              : count === 30
+                                ? "Extended"
+                                : "Intensive"}
+                        </p>
                       </button>
                     );
                   })}
@@ -482,9 +487,6 @@ export default function PracticePage() {
                   Start Quiz
                 </button>
                 {quizConfigNotice ? <p className="mt-2 text-xs text-amber-200">{quizConfigNotice}</p> : null}
-                <p className="mt-2 text-xs text-qace-muted">
-                  For full Supabase question delivery, connect this screen to mcq_questions data import next.
-                </p>
               </section>
             </GlassCard>
           ) : null}
@@ -498,7 +500,7 @@ export default function PracticePage() {
               <Badge>{`Question ${currentIndex + 1} / ${questions.length}`}</Badge>
               <span className="text-xs text-qace-muted">Topic: {activeTopicId}</span>
             </div>
-            <h2 className="mt-4 text-xl font-semibold">{currentQuestion.prompt}</h2>
+            <h2 className="mt-4 text-xl font-semibold">{cleanQuestionPrompt(currentQuestion.prompt)}</h2>
 
             <div className="mt-5 space-y-2">
               {currentQuestion.options.map((option) => {
@@ -561,6 +563,50 @@ export default function PracticePage() {
             <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
               <p className="text-sm font-semibold text-white">Feedback</p>
               <p className="mt-2 text-sm text-qace-muted">{lastAttempt.feedback_summary}</p>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <p className="text-sm font-semibold text-white">Answer Review</p>
+              {questions.map((question, index) => {
+                const selected = answers[question.id] ?? "";
+                const isCorrect = selected === question.correctOptionId;
+
+                return (
+                  <div key={question.id} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs uppercase tracking-wide text-qace-muted">Question {index + 1}</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{cleanQuestionPrompt(question.prompt)}</p>
+
+                    <div className="mt-3 space-y-2">
+                      {question.options.map((option) => {
+                        const isSelected = selected === option.id;
+                        const isCorrectOption = question.correctOptionId === option.id;
+
+                        let optionClass = "border-white/10 bg-white/5 text-qace-muted";
+                        if (isSelected && isCorrectOption) {
+                          optionClass = "border-emerald-300 bg-emerald-500/20 text-emerald-100";
+                        } else if (isSelected && !isCorrectOption) {
+                          optionClass = "border-rose-300 bg-rose-500/20 text-rose-100";
+                        } else if (!isSelected && isCorrectOption) {
+                          optionClass = "border-emerald-300/70 bg-emerald-500/10 text-emerald-100";
+                        }
+
+                        return (
+                          <div key={option.id} className={`rounded-lg border px-3 py-2 text-sm ${optionClass}`}>
+                            <span className="font-semibold">{option.id.toUpperCase()}.</span> {option.text}
+                            {isSelected && isCorrectOption ? <span className="ml-2 font-semibold">✓</span> : null}
+                            {isSelected && !isCorrectOption ? <span className="ml-2 font-semibold">✕</span> : null}
+                            {!isSelected && isCorrectOption ? <span className="ml-2 text-xs font-semibold">Correct Answer</span> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <p className={`mt-3 text-sm font-semibold ${isCorrect ? "text-emerald-300" : "text-rose-300"}`}>
+                      {isCorrect ? "✓ Correct" : "✕ Incorrect"}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="mt-5 flex flex-wrap gap-3">
