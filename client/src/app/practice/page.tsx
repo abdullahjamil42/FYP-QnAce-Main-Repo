@@ -567,7 +567,9 @@ export default function PracticePage() {
 
             <div className="mt-5 space-y-3">
               <p className="text-sm font-semibold text-white">Answer Review</p>
-              {questions.map((question, index) => {
+              {questions
+                .map((question, index) => ({ question, index }))
+                .map(({ question, index }) => {
                 const selected = answers[question.id] ?? "";
                 const isCorrect = selected === question.correctOptionId;
 
@@ -604,6 +606,12 @@ export default function PracticePage() {
                     <p className={`mt-3 text-sm font-semibold ${isCorrect ? "text-emerald-300" : "text-rose-300"}`}>
                       {isCorrect ? "✓ Correct" : "✕ Incorrect"}
                     </p>
+                    {!isCorrect && question.explanation ? (
+                      <div className="mt-3 rounded-lg border border-emerald-300/30 bg-emerald-500/10 px-3 py-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">Why this is the right answer</p>
+                        <p className="mt-1 text-sm text-emerald-100">{question.explanation}</p>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
