@@ -63,7 +63,7 @@ export default function PracticePage() {
   const [selectedQuestionCount, setSelectedQuestionCount] = useState<number>(10);
   const [selectedAnswerMode, setSelectedAnswerMode] = useState<"each" | "end">("end");
   const [selectedTimeMode, setSelectedTimeMode] = useState<"per-question" | "total" | "unlimited">("unlimited");
-  const [selectedDifficulty, setSelectedDifficulty] = useState<"easy" | "medium" | "hard">("medium");
+  const [selectedDifficulty, setSelectedDifficulty] = useState<"easy" | "medium" | "hard" | "random">("medium");
   const [quizConfigNotice, setQuizConfigNotice] = useState<string>("");
   const [liveQuestions, setLiveQuestions] = useState<QuizQuestion[]>([]);
 
@@ -387,8 +387,8 @@ export default function PracticePage() {
 
               <section className="mt-6">
                 <p className="text-sm font-semibold text-white">3. Difficulty</p>
-                <div className="mt-3 grid gap-2 md:grid-cols-3">
-                  {(["easy", "medium", "hard"] as const).map((level) => (
+                <div className="mt-3 grid gap-2 md:grid-cols-4">
+                  {(["easy", "medium", "hard", "random"] as const).map((level) => (
                     <button
                       key={level}
                       onClick={() => setSelectedDifficulty(level)}
@@ -548,6 +548,27 @@ export default function PracticePage() {
                 );
               })}
             </div>
+
+            {selectedAnswerMode === "each" && selectedOptionId ? (
+              <div
+                className={`mt-4 rounded-xl border p-4 ${
+                  selectedOptionId === currentQuestion.correctOptionId
+                    ? "border-emerald-300/40 bg-emerald-500/10"
+                    : "border-rose-300/40 bg-rose-500/10"
+                }`}
+              >
+                <p
+                  className={`text-sm font-semibold ${
+                    selectedOptionId === currentQuestion.correctOptionId ? "text-emerald-300" : "text-rose-300"
+                  }`}
+                >
+                  {selectedOptionId === currentQuestion.correctOptionId ? "✓ Correct" : "✕ Incorrect"}
+                </p>
+                {currentQuestion.explanation ? (
+                  <p className="mt-2 text-sm text-qace-muted">{currentQuestion.explanation}</p>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="mt-6 flex items-center gap-3">
               <button

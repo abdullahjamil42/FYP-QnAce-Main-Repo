@@ -56,7 +56,7 @@ function toQuizQuestion(row: DBMcqQuestion): QuizQuestion {
 export async function fetchQuizQuestions(params: {
   topicId: string;
   subtopic: string;
-  difficulty: "easy" | "medium" | "hard";
+  difficulty: "easy" | "medium" | "hard" | "random";
   count: number;
   mixAcrossTopics?: boolean;
 }): Promise<QuizQuestion[]> {
@@ -97,11 +97,16 @@ export async function fetchQuizQuestions(params: {
     const rowsByTopic = await Promise.all(
       topicIds.map(async (topicId) => {
         const table = client.from("mcq_questions" as any) as any;
-        const { data, error } = await table
+        let query = table
           .select("id,topic_id,subtopic_title,difficulty,question,options,answer,explanation")
           .eq("topic_id", topicId)
-          .eq("difficulty", params.difficulty)
           .limit(perTopicPoolLimit);
+
+        if (params.difficulty !== "random") {
+          query = query.eq("difficulty", params.difficulty);
+        }
+
+        const { data, error } = await query;
 
         if (error || !Array.isArray(data)) {
           return [] as DBMcqQuestion[];
@@ -136,8 +141,11 @@ export async function fetchQuizQuestions(params: {
   let query = table
     .select("id,topic_id,subtopic_title,difficulty,question,options,answer,explanation")
     .eq("topic_id", params.topicId)
-    .eq("difficulty", params.difficulty)
     .limit(Math.max(params.count * 4, 40));
+
+  if (params.difficulty !== "random") {
+    query = query.eq("difficulty", params.difficulty);
+  }
 
   if (params.subtopic !== "All Topics") {
     query = query.eq("subtopic_title", params.subtopic);
