@@ -1,0 +1,74 @@
+{
+  "instructions": "Generate interview-style questions for the given topic. Automatically distribute questions among the subtopics based on their importance. Include a mix of difficulty levels (easy, medium, hard) suitable for interview preparation. Questions should be realistic, scenario-based where applicable, and focused on practical understanding. Each question must have 4 options and one correct answer. Provide explanation for each answer when possible.",
+  "topic": "Computer Networks and Cloud Computing",
+  "subtopics": [
+    {
+      "name": "Data Communication",
+      "weight": 0.1
+    },
+    {
+      "name": "Computer Networks",
+      "weight": 0.1
+    },
+    {
+      "name": "Data Link Layer",
+      "weight": 0.1
+    },
+    {
+      "name": "Network Layer",
+      "weight": 0.1
+    },
+    {
+      "name": "Transport Layer",
+      "weight": 0.1
+    },
+    {
+      "name": "Application Layer",
+      "weight": 0.1
+    },
+    {
+      "name": "Wireless Networks",
+      "weight": 0.1
+    },
+    {
+      "name": "Cloud Computing",
+      "weight": 0.1
+    },
+    {
+      "name": "Network Security (Networks Perspective)",
+      "weight": 0.1
+    },
+    {
+      "name": "Next Generation Networks",
+      "weight": 0.1
+    }
+  ],
+  "num_questions": 1000,
+  "difficulty_mix": {
+    "easy": 30,
+    "medium": 50,
+    "hard": 20
+  },
+  "question_structure": {
+    "question": "string - the MCQ question",
+    "type": "MCQ",
+    "difficulty": "easy | medium | hard",
+    "subtopic": "string - name of the subtopic",
+    "options": [
+      "Option 1",
+      "Option 2",
+      "Option 3",
+      "Option 4"
+    ],
+    "answer": "Correct Option Text",
+    "explanation": "Brief explanation for the correct answer"
+  },
+  "requirements": [
+    "Distribute questions across subtopics proportionally to their weight",
+    "Include conceptual, scenario-based, and problem-solving MCQs",
+    "All questions should be interview-level, not too trivial",
+    "Options should be plausible, only one correct answer",
+    "Vary wording and examples between questions",
+    "Output JSON must be an array of question objects as per question_structure"
+  ]
+}

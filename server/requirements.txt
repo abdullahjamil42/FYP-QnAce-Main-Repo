@@ -29,6 +29,10 @@ torch==2.6.0+cu124; sys_platform == "win32" and python_version == "3.11"
 transformers==4.46.3
 peft==0.13.2
 
+# ── RAG (ChromaDB + Sentence-Transformers) ──
+chromadb>=0.4.22
+sentence-transformers>=2.2.2
+
 # ── TTS (Phase 4 — ChatterBox primary, edge-tts fallback) ──
 chatterbox-tts==0.1.6
 edge-tts>=6.1.0

@@ -1,0 +1,102 @@
+{
+  "instructions": "Generate interview-style questions for the given topic. Automatically distribute questions among the subtopics based on their importance. Include a mix of difficulty levels (easy, medium, hard) suitable for interview preparation. Questions should be realistic, scenario-based where applicable, and focused on practical understanding. Each question must have 4 options and one correct answer. Provide explanation for each answer when possible.",
+  "topic": "Databases",
+  "subtopics": [
+    {
+      "name": "Introduction to Database Systems",
+      "weight": 0.058824
+    },
+    {
+      "name": "Database System Architecture",
+      "weight": 0.058824
+    },
+    {
+      "name": "Data Models",
+      "weight": 0.058824
+    },
+    {
+      "name": "Relational Database Concepts",
+      "weight": 0.058824
+    },
+    {
+      "name": "Relational Algebra & Calculus",
+      "weight": 0.058824
+    },
+    {
+      "name": "Structured Query Language (SQL)",
+      "weight": 0.058824
+    },
+    {
+      "name": "Advanced SQL",
+      "weight": 0.058824
+    },
+    {
+      "name": "Database Design & Normalization",
+      "weight": 0.058824
+    },
+    {
+      "name": "Transaction Management",
+      "weight": 0.058824
+    },
+    {
+      "name": "Concurrency Control",
+      "weight": 0.058824
+    },
+    {
+      "name": "Recovery Management",
+      "weight": 0.058824
+    },
+    {
+      "name": "Indexing & File Organization",
+      "weight": 0.058824
+    },
+    {
+      "name": "Query Processing & Optimization",
+      "weight": 0.058824
+    },
+    {
+      "name": "Database Security",
+      "weight": 0.058824
+    },
+    {
+      "name": "Distributed Databases",
+      "weight": 0.058824
+    },
+    {
+      "name": "NoSQL & Modern Databases",
+      "weight": 0.058824
+    },
+    {
+      "name": "Data Warehousing & Data Mining (Introductory)",
+      "weight": 0.058824
+    }
+  ],
+  "num_questions": 1000,
+  "difficulty_mix": {
+    "easy": 30,
+    "medium": 50,
+    "hard": 20
+  },
+  "question_structure": {
+    "question": "string - the MCQ question",
+    "type": "MCQ",
+    "difficulty": "easy | medium | hard",
+    "subtopic": "string - name of the subtopic",
+    "options": [
+      "Option 1",
+      "Option 2",
+      "Option 3",
+      "Option 4"
+    ],
+    "answer": "Correct Option Text",
+    "explanation": "Brief explanation for the correct answer"
+  },
+  "requirements": [
+    "Distribute questions across subtopics proportionally to their weight",
+    "Include conceptual, scenario-based, and problem-solving MCQs",
+    "All questions should be interview-level, not too trivial",
+    "Options should be plausible, only one correct answer",
+    "Vary wording and examples between questions",
+    "Output JSON must be an array of question objects as per question_structure"
+  ]
+}

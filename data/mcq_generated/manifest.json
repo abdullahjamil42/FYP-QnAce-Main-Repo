@@ -1,0 +1,62 @@
+[
+  {
+    "topic_id": "ai-ml-data-analytics",
+    "topic": "AI / Machine Learning and Data Analytics",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/ai-ml-data-analytics.json"
+  },
+  {
+    "topic_id": "computer-networks-cloud",
+    "topic": "Computer Networks and Cloud Computing",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/computer-networks-cloud.json"
+  },
+  {
+    "topic_id": "cyber-security",
+    "topic": "Cyber Security",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/cyber-security.json"
+  },
+  {
+    "topic_id": "databases",
+    "topic": "Databases",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/databases.json"
+  },
+  {
+    "topic_id": "dsa",
+    "topic": "Data Structures and Algorithms",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/dsa.json"
+  },
+  {
+    "topic_id": "operating-systems",
+    "topic": "Operating Systems",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/operating-systems.json"
+  },
+  {
+    "topic_id": "problem-solving-analytical",
+    "topic": "Problem Solving and Analytical Skills",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/problem-solving-analytical.json"
+  },
+  {
+    "topic_id": "programming-core",
+    "topic": "Programming (C++/Java/Python)",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/programming-core.json"
+  },
+  {
+    "topic_id": "software-engineering",
+    "topic": "Software Engineering",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/software-engineering.json"
+  },
+  {
+    "topic_id": "web-development",
+    "topic": "Web Development",
+    "num_questions": 1000,
+    "file": "data/mcq_generated/web-development.json"
+  }
+]

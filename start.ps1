@@ -22,9 +22,9 @@ foreach ($port in @(3000, 8000)) {
         Select-Object -ExpandProperty OwningProcess -Unique |
         Where-Object { $_ -ne 0 }
 
-    foreach ($pid in $pids) {
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-        Write-Host "  Killed old process on port $port (PID $pid)" -ForegroundColor Yellow
+    foreach ($processId in $pids) {
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        Write-Host "  Killed old process on port $port (PID $processId)" -ForegroundColor Yellow
     }
 }
 
@@ -41,7 +41,7 @@ Write-Host "[Backend] Starting on http://127.0.0.1:8000 ..." -ForegroundColor Gr
 $backendJob = Start-Job -ScriptBlock {
     param($workspaceRoot)
     Set-Location (Join-Path $workspaceRoot "server")
-    & (Join-Path $workspaceRoot ".venv311\Scripts\python.exe") -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info 2>&1
+    & (Join-Path $workspaceRoot ".venv311\Scripts\python.exe") -m uvicorn app.main:app --host localhost --port 8000 --log-level info 2>&1
 } -ArgumentList $root
 Write-Host "  Backend started (Job ID: $($backendJob.Id))" -ForegroundColor DarkGray
 
@@ -80,7 +80,7 @@ Write-Host ""
 
 Set-Location (Join-Path $root "client")
 try {
-    npm run dev -- --hostname 127.0.0.1 --port 3000
+    npm run dev
 }
 finally {
     Write-Host ""
@@ -92,8 +92,8 @@ finally {
         Select-Object -ExpandProperty OwningProcess -Unique |
         Where-Object { $_ -ne 0 }
 
-    foreach ($pid in $backendPids) {
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    foreach ($processId in $backendPids) {
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host "Done." -ForegroundColor Green

@@ -1,0 +1,98 @@
+{
+  "instructions": "Generate interview-style questions for the given topic. Automatically distribute questions among the subtopics based on their importance. Include a mix of difficulty levels (easy, medium, hard) suitable for interview preparation. Questions should be realistic, scenario-based where applicable, and focused on practical understanding. Each question must have 4 options and one correct answer. Provide explanation for each answer when possible.",
+  "topic": "Cyber Security",
+  "subtopics": [
+    {
+      "name": "Introduction to Cyber Security",
+      "weight": 0.0625
+    },
+    {
+      "name": "Security Fundamentals & Principles",
+      "weight": 0.0625
+    },
+    {
+      "name": "Cryptography Basics",
+      "weight": 0.0625
+    },
+    {
+      "name": "Network Security",
+      "weight": 0.0625
+    },
+    {
+      "name": "Operating System Security",
+      "weight": 0.0625
+    },
+    {
+      "name": "Web Application Security",
+      "weight": 0.0625
+    },
+    {
+      "name": "Malware & Attack Techniques",
+      "weight": 0.0625
+    },
+    {
+      "name": "Authentication & Access Control",
+      "weight": 0.0625
+    },
+    {
+      "name": "Secure Software Development",
+      "weight": 0.0625
+    },
+    {
+      "name": "Wireless & Mobile Security",
+      "weight": 0.0625
+    },
+    {
+      "name": "Cloud & Virtualization Security",
+      "weight": 0.0625
+    },
+    {
+      "name": "Digital Forensics",
+      "weight": 0.0625
+    },
+    {
+      "name": "Incident Response & Management",
+      "weight": 0.0625
+    },
+    {
+      "name": "Security Monitoring & Auditing",
+      "weight": 0.0625
+    },
+    {
+      "name": "Cyber Laws & Ethics",
+      "weight": 0.0625
+    },
+    {
+      "name": "Emerging Trends in Cyber Security",
+      "weight": 0.0625
+    }
+  ],
+  "num_questions": 1000,
+  "difficulty_mix": {
+    "easy": 30,
+    "medium": 50,
+    "hard": 20
+  },
+  "question_structure": {
+    "question": "string - the MCQ question",
+    "type": "MCQ",
+    "difficulty": "easy | medium | hard",
+    "subtopic": "string - name of the subtopic",
+    "options": [
+      "Option 1",
+      "Option 2",
+      "Option 3",
+      "Option 4"
+    ],
+    "answer": "Correct Option Text",
+    "explanation": "Brief explanation for the correct answer"
+  },
+  "requirements": [
+    "Distribute questions across subtopics proportionally to their weight",
+    "Include conceptual, scenario-based, and problem-solving MCQs",
+    "All questions should be interview-level, not too trivial",
+    "Options should be plausible, only one correct answer",
+    "Vary wording and examples between questions",
+    "Output JSON must be an array of question objects as per question_structure"
+  ]
+}

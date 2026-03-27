@@ -1,0 +1,98 @@
+{
+  "instructions": "Generate interview-style questions for the given topic. Automatically distribute questions among the subtopics based on their importance. Include a mix of difficulty levels (easy, medium, hard) suitable for interview preparation. Questions should be realistic, scenario-based where applicable, and focused on practical understanding. Each question must have 4 options and one correct answer. Provide explanation for each answer when possible.",
+  "topic": "Programming (C++/Java/Python)",
+  "subtopics": [
+    {
+      "name": "Programming Fundamentals",
+      "weight": 0.0625
+    },
+    {
+      "name": "Data Types & Variables",
+      "weight": 0.0625
+    },
+    {
+      "name": "Operators & Expressions",
+      "weight": 0.0625
+    },
+    {
+      "name": "Control Structures",
+      "weight": 0.0625
+    },
+    {
+      "name": "Functions / Methods",
+      "weight": 0.0625
+    },
+    {
+      "name": "Input / Output Handling",
+      "weight": 0.0625
+    },
+    {
+      "name": "Strings & Text Processing",
+      "weight": 0.0625
+    },
+    {
+      "name": "Arrays & Collections",
+      "weight": 0.0625
+    },
+    {
+      "name": "Object-Oriented Programming (OOP)",
+      "weight": 0.0625
+    },
+    {
+      "name": "Memory Management Concepts",
+      "weight": 0.0625
+    },
+    {
+      "name": "Exception & Error Handling",
+      "weight": 0.0625
+    },
+    {
+      "name": "Modules, Packages & Libraries",
+      "weight": 0.0625
+    },
+    {
+      "name": "Advanced Programming Concepts",
+      "weight": 0.0625
+    },
+    {
+      "name": "Concurrency & Parallelism (Introductory)",
+      "weight": 0.0625
+    },
+    {
+      "name": "Debugging, Testing & Optimization",
+      "weight": 0.0625
+    },
+    {
+      "name": "Software Development Practices",
+      "weight": 0.0625
+    }
+  ],
+  "num_questions": 1000,
+  "difficulty_mix": {
+    "easy": 30,
+    "medium": 50,
+    "hard": 20
+  },
+  "question_structure": {
+    "question": "string - the MCQ question",
+    "type": "MCQ",
+    "difficulty": "easy | medium | hard",
+    "subtopic": "string - name of the subtopic",
+    "options": [
+      "Option 1",
+      "Option 2",
+      "Option 3",
+      "Option 4"
+    ],
+    "answer": "Correct Option Text",
+    "explanation": "Brief explanation for the correct answer"
+  },
+  "requirements": [
+    "Distribute questions across subtopics proportionally to their weight",
+    "Include conceptual, scenario-based, and problem-solving MCQs",
+    "All questions should be interview-level, not too trivial",
+    "Options should be plausible, only one correct answer",
+    "Vary wording and examples between questions",
+    "Output JSON must be an array of question objects as per question_structure"
+  ]
+}

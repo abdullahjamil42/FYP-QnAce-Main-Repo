@@ -1,0 +1,98 @@
+{
+  "instructions": "Generate interview-style questions for the given topic. Automatically distribute questions among the subtopics based on their importance. Include a mix of difficulty levels (easy, medium, hard) suitable for interview preparation. Questions should be realistic, scenario-based where applicable, and focused on practical understanding. Each question must have 4 options and one correct answer. Provide explanation for each answer when possible.",
+  "topic": "Problem Solving and Analytical Skills",
+  "subtopics": [
+    {
+      "name": "Introduction to Problem Solving",
+      "weight": 0.0625
+    },
+    {
+      "name": "Problem Understanding & Analysis",
+      "weight": 0.0625
+    },
+    {
+      "name": "Logical Reasoning Fundamentals",
+      "weight": 0.0625
+    },
+    {
+      "name": "Algorithms & Flow Control",
+      "weight": 0.0625
+    },
+    {
+      "name": "Data Representation & Abstraction",
+      "weight": 0.0625
+    },
+    {
+      "name": "Pattern Recognition & Generalization",
+      "weight": 0.0625
+    },
+    {
+      "name": "Mathematical & Quantitative Reasoning",
+      "weight": 0.0625
+    },
+    {
+      "name": "Algorithmic Thinking",
+      "weight": 0.0625
+    },
+    {
+      "name": "Critical Thinking & Decision Making",
+      "weight": 0.0625
+    },
+    {
+      "name": "Debugging & Error Analysis",
+      "weight": 0.0625
+    },
+    {
+      "name": "Complexity & Efficiency Awareness",
+      "weight": 0.0625
+    },
+    {
+      "name": "Problem Solving Using Programming",
+      "weight": 0.0625
+    },
+    {
+      "name": "Data-Driven Problem Solving",
+      "weight": 0.0625
+    },
+    {
+      "name": "Creative & Innovative Thinking",
+      "weight": 0.0625
+    },
+    {
+      "name": "Real-World Problem Solving",
+      "weight": 0.0625
+    },
+    {
+      "name": "Communication & Documentation of Solutions",
+      "weight": 0.0625
+    }
+  ],
+  "num_questions": 1000,
+  "difficulty_mix": {
+    "easy": 30,
+    "medium": 50,
+    "hard": 20
+  },
+  "question_structure": {
+    "question": "string - the MCQ question",
+    "type": "MCQ",
+    "difficulty": "easy | medium | hard",
+    "subtopic": "string - name of the subtopic",
+    "options": [
+      "Option 1",
+      "Option 2",
+      "Option 3",
+      "Option 4"
+    ],
+    "answer": "Correct Option Text",
+    "explanation": "Brief explanation for the correct answer"
+  },
+  "requirements": [
+    "Distribute questions across subtopics proportionally to their weight",
+    "Include conceptual, scenario-based, and problem-solving MCQs",
+    "All questions should be interview-level, not too trivial",
+    "Options should be plausible, only one correct answer",
+    "Vary wording and examples between questions",
+    "Output JSON must be an array of question objects as per question_structure"
+  ]
+}
