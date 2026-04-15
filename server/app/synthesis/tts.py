@@ -417,6 +417,15 @@ def time_stretch_audio(pcm: np.ndarray, sample_rate: int, rate: float) -> np.nda
         logger.warning("time_stretch_audio failed: %s", e)
         return pcm
 
+
+def _edge_rate_for_stress(stress_level: str) -> str:
+    """Map stress level to edge-tts native speaking-rate control."""
+    if stress_level == "brutal":
+        return "+22%"
+    if stress_level == "high":
+        return "+12%"
+    return "+0%"
+
 # ---------------------------------------------------------------------------
 # Engine class
 # ---------------------------------------------------------------------------
@@ -514,6 +523,7 @@ class TTSEngine:
         if not text or not text.strip():
             return _synthesize_silence(0.2)
 
+        edge_rate = _edge_rate_for_stress(stress_level)
         rate = 1.0
         if stress_level == "brutal":
             rate = 1.22
@@ -525,9 +535,8 @@ class TTSEngine:
             res = await self._synthesize_chatterbox(text)
         elif self._engine_name == "edge-tts":
             try:
-                # edge_tts can do its own rate mapping if we pass rate="+12%" but for consistency we use librosa 
-                # actually let's just stick to time_stretch_audio to avoid edge cases with edge_tts rate bugs
-                res = await _synthesize_edge(text, self.voice)
+                # Use edge-tts native rate control and avoid post time-stretch artifacts.
+                res = await _synthesize_edge(text, self.voice, rate=edge_rate)
             except Exception as exc:
                 logger.warning("edge-tts failed (%s) — falling back to tone", exc)
                 res = _synthesize_tone(text)
@@ -536,8 +545,8 @@ class TTSEngine:
             
         if rate != 1.0 and res and res.audio_pcm is not None:
             # librosa-based phase vocoder can create metallic artifacts on
-            # ChatterBox output; keep ChatterBox un-stretched for clarity.
-            if self._engine_name != "chatterbox-turbo":
+            # ChatterBox/edge-tts output; keep native output for clarity.
+            if self._engine_name not in ("chatterbox-turbo", "edge-tts"):
                 stretched_pcm = time_stretch_audio(res.audio_pcm, res.sample_rate, rate)
                 # Recompute duration
                 new_dur = len(stretched_pcm) / max(res.sample_rate, 1)
