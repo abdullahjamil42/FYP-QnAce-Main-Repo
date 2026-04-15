@@ -18,6 +18,7 @@ from .config import get_settings
 from .intelligence.llm import check_local_llm_endpoint
 from .intelligence.rag import init_rag
 from .models.registry import prewarm_all
+from .runtime.cudnn_guard import apply_global_cudnn_guard
 
 logger = logging.getLogger("qace")
 
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     logger.info("Q&Ace server starting …")
+    apply_global_cudnn_guard()
 
     if settings.normalized_llm_provider == "local":
         if settings.local_llm_base_url.strip():
@@ -50,7 +52,7 @@ async def lifespan(app: FastAPI):
 
     await prewarm_all()
     # Phase 3: init RAG
-    init_rag(settings.chroma_dir)
+    init_rag(settings.chroma_dir, settings.rag_embed_device)
     yield
     logger.info("Q&Ace server shutting down.")
 
@@ -93,7 +95,11 @@ async def health():
 # ── WebRTC signaling route (lazy import to avoid hard dep on aiortc) ──
 try:
     from .webrtc.signaling import router as webrtc_router
+    from .webrtc.cv_routes import cv_router
+    from .webrtc.report_routes import report_router
 
     app.include_router(webrtc_router, prefix="/webrtc")
+    app.include_router(cv_router, prefix="/api/cv")
+    app.include_router(report_router, prefix="/api/report")
 except ImportError as exc:
     logger.warning("WebRTC signaling unavailable (%s)", exc)

@@ -40,6 +40,7 @@ export function useWebRTC() {
   const [remoteVideoStream, setRemoteVideoStream] = useState<MediaStream | null>(null);
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isCamEnabled, setIsCamEnabled] = useState(true);
+  const [micGated, setMicGated] = useState(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -59,15 +60,32 @@ export function useWebRTC() {
     }
   }, []);
 
+  const applyMicGate = useCallback(
+    (gated: boolean) => {
+      setMicGated(gated);
+      const stream = streamRef.current;
+      if (!stream) return;
+      // If system is ungating, only enable if user hasn't manually muted
+      const shouldEnable = !gated && isMicEnabled;
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = shouldEnable;
+      });
+    },
+    [isMicEnabled]
+  );
+
   const toggleMic = useCallback(() => {
     const stream = streamRef.current;
     if (!stream) return;
     const next = !isMicEnabled;
-    stream.getAudioTracks().forEach((track) => {
-      track.enabled = next;
-    });
+    // Only touch the track if mic is not system-gated
+    if (!micGated) {
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = next;
+      });
+    }
     setIsMicEnabled(next);
-  }, [isMicEnabled]);
+  }, [isMicEnabled, micGated]);
 
   const toggleCam = useCallback(() => {
     const stream = webcamRef.current;
@@ -80,7 +98,7 @@ export function useWebRTC() {
   }, [isCamEnabled]);
 
   // ── Start session ──
-  const start = useCallback(async () => {
+  const start = useCallback(async (durationMinutes: number = 20, stressLevel: string = "none", cvSessionId: string = "") => {
     setState("connecting");
     setError(null);
 
@@ -154,7 +172,10 @@ export function useWebRTC() {
       // 5. Monitor connection state
       pc.onconnectionstatechange = () => {
         const s = pc.connectionState;
-        if (s === "connected") setState("connected");
+        if (s === "connected") {
+          setState("connected");
+          setMicGated(false); // Reset gate on successful connection/reconnect
+        }
         if (s === "failed" || s === "closed") {
           setState("idle");
           cleanup();
@@ -184,6 +205,9 @@ export function useWebRTC() {
         body: JSON.stringify({
           sdp: pc.localDescription!.sdp,
           type: pc.localDescription!.type,
+          duration_minutes: durationMinutes,
+          stress_level: stressLevel,
+          cv_session_id: cvSessionId,
         }),
       });
 
@@ -238,6 +262,7 @@ export function useWebRTC() {
     setRemoteVideoStream(null);
     setIsMicEnabled(true);
     setIsCamEnabled(true);
+    setMicGated(false);
   }
 
   return {
@@ -251,8 +276,10 @@ export function useWebRTC() {
     remoteVideoStream,
     isMicEnabled,
     isCamEnabled,
+    micGated,
     toggleMic,
     toggleCam,
+    applyMicGate,
     start,
     stop,
     addVideoTrack,

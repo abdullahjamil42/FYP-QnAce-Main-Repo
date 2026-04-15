@@ -253,7 +253,7 @@ export default function MediaPipeFaceMesh({
     <div className="relative">
       <video
         ref={videoRef}
-        className={`${videoClassName} bg-qace-surface object-cover shadow-lg`}
+        className={`${videoClassName} bg-qace-surface object-contain shadow-lg`}
         autoPlay
         playsInline
         muted
@@ -261,7 +261,7 @@ export default function MediaPipeFaceMesh({
       {showOverlay && (
         <canvas
           ref={canvasRef}
-          className={`pointer-events-none absolute inset-0 ${videoClassName}`}
+          className={`pointer-events-none absolute inset-0 object-contain ${videoClassName}`}
         />
       )}
       {error && (

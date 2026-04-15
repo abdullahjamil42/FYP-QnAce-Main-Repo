@@ -197,6 +197,19 @@ class TTSAudioStreamTrack(_get_media_stream_track_base()):
         """Signal end of current TTS utterance (track continues with silence)."""
         self._queue.put_nowait(None)
 
+    def is_queue_drained(self) -> bool:
+        """Return True if the playback queue and buffer are both empty."""
+        return self._queue.empty() and len(self._buffer) == 0
+
+    async def wait_until_drained(self, poll_interval: float = 0.1, timeout: float = 30.0) -> bool:
+        """Wait until the track has fully drained into the WebRTC stream."""
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if self.is_queue_drained():
+                return True
+            await asyncio.sleep(poll_interval)
+        return False  # timed out
+
     # -- aiortc recv --
 
     async def recv(self):  # noqa: D401

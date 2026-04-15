@@ -9,6 +9,8 @@ export type SetupConfig = {
   mode: string;
   difficulty: string;
   durationMinutes: number;
+  stressLevel: "none" | "mild" | "high" | "brutal";
+  cvSessionId?: string;
 };
 
 export type SessionRecord = {
@@ -17,6 +19,7 @@ export type SessionRecord = {
   mode: string;
   difficulty: string;
   duration_minutes: number;
+  stress_level: string;
   status: "completed" | "aborted";
   started_at: string;
   ended_at: string;
@@ -34,6 +37,7 @@ export type SessionDraft = {
   mode: string;
   difficulty: string;
   durationMinutes: number;
+  stressLevel?: string;
   startedAt: string;
   endedAt: string;
   status: "completed" | "aborted";
@@ -74,6 +78,7 @@ function computeSessionRecord(draft: SessionDraft, userId: string | null): Sessi
     mode: draft.mode,
     difficulty: draft.difficulty,
     duration_minutes: draft.durationMinutes,
+    stress_level: draft.stressLevel || "none",
     status: draft.status,
     started_at: draft.startedAt,
     ended_at: draft.endedAt,
@@ -110,6 +115,8 @@ export function loadSetupConfig(): SetupConfig {
       mode: "technical",
       difficulty: "standard",
       durationMinutes: 20,
+      stressLevel: "none",
+      cvSessionId: "",
     };
   }
 
@@ -119,6 +126,8 @@ export function loadSetupConfig(): SetupConfig {
       mode: "technical",
       difficulty: "standard",
       durationMinutes: 20,
+      stressLevel: "none",
+      cvSessionId: "",
     };
   }
 
@@ -128,12 +137,16 @@ export function loadSetupConfig(): SetupConfig {
       mode: parsed.mode || "technical",
       difficulty: parsed.difficulty || "standard",
       durationMinutes: Number(parsed.durationMinutes) || 20,
+      stressLevel: parsed.stressLevel || "none",
+      cvSessionId: parsed.cvSessionId || "",
     };
   } catch {
     return {
       mode: "technical",
       difficulty: "standard",
       durationMinutes: 20,
+      stressLevel: "none",
+      cvSessionId: "",
     };
   }
 }
@@ -149,6 +162,7 @@ export async function persistSession(draft: SessionDraft): Promise<SessionRecord
       mode: localRecord.mode,
       difficulty: localRecord.difficulty,
       duration_minutes: localRecord.duration_minutes,
+      stress_level: localRecord.stress_level,
       status: localRecord.status,
       started_at: localRecord.started_at,
       ended_at: localRecord.ended_at,

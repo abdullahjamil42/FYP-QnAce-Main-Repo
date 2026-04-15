@@ -6,6 +6,7 @@ import { useDataChannel } from "@/hooks/useDataChannel";
 import { useWebRTC } from "@/hooks/useWebRTC";
 import VideoCanvas from "@/components/VideoCanvas";
 import { loadSetupConfig, persistSession } from "@/lib/interview-session-store";
+import InterviewerAvatar, { InterviewerAvatarRef } from "@/components/InterviewerAvatar";
 
 export default function LiveSessionRoom() {
   const router = useRouter();
@@ -20,16 +21,40 @@ export default function LiveSessionRoom() {
     remoteVideoStream,
     isMicEnabled,
     isCamEnabled,
+    micGated,
     toggleMic,
     toggleCam,
+    applyMicGate,
     start,
     stop,
     addVideoTrack,
   } = useWebRTC();
-  const { transcripts, scores, perception, statusLog, clearTranscripts, sendAUTelemetry } = useDataChannel(dataChannel, auChannel);
+  const {
+    transcripts,
+    scores,
+    perception,
+    statusLog,
+    micGated: serverMicGated,
+    stage,
+    timeWarning,
+    sessionEndedReason,
+    silencePrompt,
+    avatarState,
+    clearTranscripts,
+    sendAUTelemetry,
+  } = useDataChannel(dataChannel, auChannel);
   const startedAtRef = useRef<string | null>(null);
   const isSavingRef = useRef(false);
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(true);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const avatarRef = useRef<InterviewerAvatarRef>(null);
+
+  const formatTime = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
 
   const isConnected = state === "connected";
   const isConnecting = state === "connecting";
@@ -74,6 +99,15 @@ export default function LiveSessionRoom() {
     };
   }, [remoteAudioStream]);
 
+  // Handle Avatar Lip Sync Connection
+  useEffect(() => {
+    if (remoteAudioStream && avatarRef.current) {
+      avatarRef.current.speak(remoteAudioStream);
+    } else if (!remoteAudioStream && avatarRef.current) {
+      avatarRef.current.stopSpeaking();
+    }
+  }, [remoteAudioStream]);
+
   const handleFaceCropStream = useCallback(
     (stream: MediaStream) => {
       addVideoTrack(stream);
@@ -82,17 +116,35 @@ export default function LiveSessionRoom() {
   );
 
   useEffect(() => {
+    applyMicGate(serverMicGated);
+  }, [serverMicGated, applyMicGate]);
+
+  useEffect(() => {
     if (state === "connected" && !startedAtRef.current) {
       startedAtRef.current = new Date().toISOString();
     }
   }, [state]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (state === "connected" && startedAtRef.current) {
+      interval = setInterval(() => {
+        const start = new Date(startedAtRef.current!).getTime();
+        setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [state]);
+
+
 
   const handleStart = useCallback(() => {
     clearTranscripts();
     if (!startedAtRef.current) {
       startedAtRef.current = new Date().toISOString();
     }
-    void start();
+    const setup = loadSetupConfig();
+    void start(setup.durationMinutes, setup.stressLevel, setup.cvSessionId ?? "");
   }, [clearTranscripts, start]);
 
   const handleDropCall = useCallback(() => {
@@ -135,23 +187,44 @@ export default function LiveSessionRoom() {
     }
   }, [perception, router, scores, sessionId, stop, transcripts]);
 
+  useEffect(() => {
+    if (sessionEndedReason && state === "connected" && !isSavingRef.current && !isTransitioning) {
+      setIsTransitioning(true);
+      setTimeout(() => {
+        void handleStopAndSave();
+      }, 3000);
+    }
+  }, [sessionEndedReason, state, handleStopAndSave, isTransitioning]);
+
+  if (isTransitioning) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#0b1225] via-[#0d152d] to-[#091024] text-qace-text">
+        <div className="card-glow flex h-32 w-32 items-center justify-center rounded-3xl border border-white/20 bg-white/5 shadow-2xl animate-pulse">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent" />
+        </div>
+        <h1 className="mt-8 text-2xl font-semibold tracking-wide text-white">Saving Interview Data...</h1>
+        <p className="mt-2 text-qace-muted">Analyzing your performance across all dimensions.</p>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#0b1225] via-[#0d152d] to-[#091024] p-4 text-qace-text lg:p-6">
-      <header className="card-glow mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/5 px-4 py-3 shadow-xl shadow-black/20">
+    <main className="min-h-screen bg-black p-4 text-qace-text lg:p-6 selection:bg-[var(--accent-hover)] selection:text-white">
+      <div className="apple-gradient-bg" />
+      <header className="apple-glass mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[2rem] px-6 py-4">
         <div>
-          <p className="text-xs uppercase tracking-wide text-qace-muted">Q&Ace Live Interview Room</p>
-          <h1 className="text-xl font-semibold">Frontend Developer Mock Interview</h1>
+          <p className="text-[10px] uppercase tracking-widest text-[var(--muted)] font-semibold mb-1">Live Interview Room</p>
+          <h1 className="text-xl font-bold tracking-tight text-white">Frontend Developer Mock Interview</h1>
         </div>
         <div className="flex items-center gap-2 text-xs">
           <span className="rounded-full bg-black/30 px-2.5 py-1 text-qace-muted">AI Interview Mode</span>
           <span
-            className={`rounded-full px-2.5 py-1 font-medium ${
-              isConnected
-                ? "bg-emerald-500/25 text-emerald-200"
-                : isConnecting
-                  ? "bg-amber-500/25 text-amber-100"
-                  : "bg-slate-500/25 text-slate-200"
-            }`}
+            className={`rounded-full px-2.5 py-1 font-medium ${isConnected
+              ? "bg-emerald-500/25 text-emerald-200"
+              : isConnecting
+                ? "bg-amber-500/25 text-amber-100"
+                : "bg-slate-500/25 text-slate-200"
+              }`}
           >
             {state}
           </span>
@@ -165,14 +238,20 @@ export default function LiveSessionRoom() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-12">
+      <div className="grid gap-6 lg:grid-cols-12">
         <section className="lg:col-span-8">
-          <div className="card-glow relative overflow-hidden rounded-3xl border border-white/20 bg-[#12182a] p-3 shadow-2xl shadow-black/35">
-            <div className="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full bg-black/45 px-3 py-1 text-xs">
+          <div className="apple-glass relative overflow-hidden rounded-[2.5rem] p-4 shadow-2xl">
+            <div className="absolute left-8 top-8 z-10 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 text-[11px] font-semibold tracking-wide backdrop-blur-md">
               <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-red-400 animate-pulse" : "bg-slate-400"}`} />
               <span>{isConnected ? "Live Recording" : "Not Connected"}</span>
             </div>
 
+            {timeWarning !== null && timeWarning <= 5 && (
+              <div className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-semibold text-white shadow-lg shadow-amber-500/50 animate-pulse">
+                <span>⏱️ {timeWarning} min left</span>
+              </div>
+            )}
+            
             <audio ref={ttsAudioRef} autoPlay playsInline className="hidden" />
 
             {webcamStream ? (
@@ -183,23 +262,31 @@ export default function LiveSessionRoom() {
                 showOverlay={true}
                 showStats={false}
                 containerClassName="w-full"
-                videoClassName="h-[420px] w-full rounded-2xl"
+                videoClassName="h-[460px] w-full rounded-[2rem] object-cover"
               />
             ) : (
-              <div className="flex h-[420px] w-full items-center justify-center rounded-2xl bg-qace-surface text-6xl">📷</div>
+              <div className="flex h-[460px] w-full items-center justify-center rounded-[2rem] bg-zinc-900 text-6xl">📷</div>
             )}
 
-            <div className="card-glow absolute right-6 top-6 z-10 w-52 overflow-hidden rounded-2xl border border-white/20 bg-black/30 backdrop-blur-sm">
-              {remoteVideoStream ? (
-                <video ref={avatarVideoRef} autoPlay playsInline muted className="h-32 w-full object-cover" />
-              ) : (
-                <div className="flex h-32 items-center justify-center text-4xl">🧑‍💼</div>
-              )}
-              <div className="flex items-center justify-between px-3 py-2 text-xs text-qace-muted">
+            <div className={`absolute right-8 top-8 z-20 w-[240px] h-[320px] overflow-hidden rounded-[1.5rem] bg-black/40 backdrop-blur-2xl shadow-2xl border transition-all duration-300 ${avatarState === "AVATAR_INTERRUPT" ? "border-red-500/50 shadow-[0_0_30px_rgba(239,68,68,0.3)] scale-105" : avatarState === "AVATAR_COLD" ? "border-blue-400/30" : "border-white/10"}`}>
+              <InterviewerAvatar 
+                ref={avatarRef}
+                avatarState={avatarState}
+                containerClassName="w-full h-full"
+              />
+              <div className="flex items-center justify-between px-4 py-2 text-[10px] text-[var(--muted)] font-semibold uppercase tracking-wider bg-black/50 absolute bottom-0 left-0 right-0 backdrop-blur-lg">
                 <span>AI Interviewer</span>
-                <span>{remoteAudioStream ? "voice on" : "voice wait"}</span>
+                <span className={serverMicGated ? "text-blue-400 animate-pulse" : remoteAudioStream ? "text-green-400" : ""}>
+                  {serverMicGated ? "Thinking..." : remoteAudioStream ? "Connected" : "Ready"}
+                </span>
               </div>
             </div>
+
+            {silencePrompt && isConnected && (
+              <div className="absolute left-1/2 top-8 z-10 -translate-x-1/2 rounded-full border border-blue-400/30 bg-blue-500/20 px-6 py-2 text-center backdrop-blur-xl shadow-2xl animate-fade-up">
+                <p className="font-semibold text-blue-100 text-sm tracking-wide">{silencePrompt}</p>
+              </div>
+            )}
 
             <div className="card-glow mt-3 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/20 bg-black/25 px-3 py-3">
               <button
@@ -211,19 +298,21 @@ export default function LiveSessionRoom() {
               </button>
               <button
                 onClick={toggleMic}
-                disabled={!isConnected}
-                className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition disabled:opacity-40 ${
-                  isMicEnabled ? "bg-slate-700 hover:bg-slate-600" : "bg-amber-600 hover:bg-amber-500"
-                }`}
+                disabled={!isConnected || micGated}
+                className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition disabled:opacity-40 ${micGated
+                  ? "bg-violet-600 animate-pulse"
+                  : isMicEnabled
+                    ? "bg-slate-700 hover:bg-slate-600"
+                    : "bg-amber-600 hover:bg-amber-500"
+                  }`}
               >
-                {isMicEnabled ? "Mic On" : "Mic Off"}
+                {micGated ? "Processing…" : isMicEnabled ? "Mic On" : "Mic Off"}
               </button>
               <button
                 onClick={toggleCam}
                 disabled={!isConnected || !webcamStream}
-                className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition disabled:opacity-40 ${
-                  isCamEnabled ? "bg-slate-700 hover:bg-slate-600" : "bg-amber-600 hover:bg-amber-500"
-                }`}
+                className={`rounded-full px-5 py-2 text-sm font-semibold text-white transition disabled:opacity-40 ${isCamEnabled ? "bg-slate-700 hover:bg-slate-600" : "bg-amber-600 hover:bg-amber-500"
+                  }`}
               >
                 {isCamEnabled ? "Cam On" : "Cam Off"}
               </button>
@@ -254,22 +343,22 @@ export default function LiveSessionRoom() {
         <aside className="space-y-4 lg:col-span-4">
           <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold">Interview Intelligence</h2>
-              <span className="rounded-full bg-qace-primary/20 px-2 py-1 text-xs text-indigo-200">AI Analysis</span>
+              <h2 className="text-base font-semibold">Session Progress</h2>
+              <span className="rounded-full bg-qace-primary/20 px-2 py-1 text-xs text-indigo-200">
+                {stage ? stage.replace("_", " ") : "CONNECTING"}
+              </span>
             </div>
-            {scores ? (
-              <div className="space-y-3 text-sm">
-                <ScoreRow label="Content" value={scores.content} />
-                <ScoreRow label="Delivery" value={scores.delivery} />
-                <ScoreRow label="Composure" value={scores.composure} />
-                <div className="card-glow rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-center">
-                  <div className="text-3xl font-semibold text-qace-accent">{scores.final.toFixed(1)}</div>
-                  <div className="text-xs text-qace-muted">Overall Score</div>
+            
+            <div className="card-glow mt-4 flex items-center justify-center rounded-xl border border-white/20 bg-black/20 px-3 py-4">
+              <div className="text-center">
+                <div className="text-4xl font-mono tracking-wider font-semibold text-qace-accent">
+                  {formatTime(elapsedSeconds)}
+                </div>
+                <div className="mt-1 text-xs text-qace-muted uppercase tracking-wider">
+                  Time Elapsed
                 </div>
               </div>
-            ) : (
-              <p className="text-sm italic text-qace-muted">Start speaking to unlock score and coaching metrics.</p>
-            )}
+            </div>
           </section>
 
           <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">

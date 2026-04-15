@@ -47,11 +47,42 @@ export interface StatusEvent {
   message: string;
 }
 
+export interface MicGateEvent {
+  state: "disabled" | "enabled";
+  reason: string;
+}
+
+export interface StageChangeEvent {
+  stage: string;
+}
+
+export interface TimeWarningEvent {
+  remaining_minutes: number;
+}
+
+export interface AvatarStateEvent {
+  state: string;
+}
+
+export interface SessionEndedEvent {
+  reason: string;
+}
+
+export interface SilencePromptEvent {
+  text: string;
+}
+
 export type ChannelEvent =
   | ({ type: "transcript" } & TranscriptEvent)
   | ({ type: "scores" } & ScoresEvent)
   | ({ type: "perception" } & PerceptionEvent)
-  | ({ type: "status" } & StatusEvent);
+  | ({ type: "status" } & StatusEvent)
+  | ({ type: "mic_gate" } & MicGateEvent)
+  | ({ type: "stage_change" } & StageChangeEvent)
+  | ({ type: "time_warning" } & TimeWarningEvent)
+  | ({ type: "session_ended" } & SessionEndedEvent)
+  | ({ type: "silence_prompt" } & SilencePromptEvent)
+  | ({ type: "avatar_state" } & AvatarStateEvent);
 
 export function useDataChannel(
   dataChannel: RTCDataChannel | null,
@@ -60,9 +91,17 @@ export function useDataChannel(
   const [transcripts, setTranscripts] = useState<TranscriptEvent[]>([]);
   const [latestTranscript, setLatestTranscript] =
     useState<TranscriptEvent | null>(null);
-  const [scores, setScores] = useState<ScoresEvent | null>(null);
+  const [currentScores, setCurrentScores] = useState<ScoresEvent | null>(null);
   const [perception, setPerception] = useState<PerceptionEvent | null>(null);
   const [statusLog, setStatusLog] = useState<string[]>([]);
+  const [micGated, setMicGated] = useState(false);
+  
+  // Realism Engine States
+  const [stage, setStage] = useState<string | null>(null);
+  const [timeWarning, setTimeWarning] = useState<number | null>(null);
+  const [sessionEndedReason, setSessionEndedReason] = useState<string | null>(null);
+  const [silencePrompt, setSilencePrompt] = useState<string | null>(null);
+  const [avatarState, setAvatarState] = useState<string | null>(null);
 
   // Handle JSON events from server
   useEffect(() => {
@@ -85,7 +124,7 @@ export function useDataChannel(
             break;
           }
           case "scores":
-            setScores({
+            setCurrentScores({
               content: parsed.content,
               delivery: parsed.delivery,
               composure: parsed.composure,
@@ -112,6 +151,36 @@ export function useDataChannel(
             setStatusLog((prev) => [
               ...prev.slice(-19), // keep last 20
               `[${new Date().toLocaleTimeString()}] ${parsed.message}`,
+            ]);
+            break;
+          case "mic_gate":
+            setMicGated(parsed.state === "disabled");
+            setStatusLog((prev) => [
+              ...prev.slice(-19),
+              `[${new Date().toLocaleTimeString()}] System mic gate: ${parsed.state} (${parsed.reason})`,
+            ]);
+            break;
+          case "stage_change":
+            setStage(parsed.stage);
+            setStatusLog((prev) => [
+              ...prev.slice(-19),
+              `[${new Date().toLocaleTimeString()}] Stage -> ${parsed.stage}`,
+            ]);
+            break;
+          case "time_warning":
+            setTimeWarning(parsed.remaining_minutes);
+            break;
+          case "session_ended":
+            setSessionEndedReason(parsed.reason);
+            break;
+          case "silence_prompt":
+            setSilencePrompt(parsed.text);
+            break;
+          case "avatar_state":
+            setAvatarState(parsed.state);
+            setStatusLog((prev) => [
+              ...prev.slice(-19),
+              `[${new Date().toLocaleTimeString()}] Avatar Event: ${parsed.state}`,
             ]);
             break;
         }
@@ -146,9 +215,15 @@ export function useDataChannel(
   return {
     transcripts,
     latestTranscript,
-    scores,
+    scores: currentScores,
     perception,
     statusLog,
+    micGated,
+    stage,
+    timeWarning,
+    sessionEndedReason,
+    silencePrompt,
+    avatarState,
     clearTranscripts,
     sendAUTelemetry,
   };

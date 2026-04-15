@@ -8,6 +8,8 @@ import { getSessionById, type SessionRecord } from "@/lib/interview-session-stor
 
 export default function ReportDetailPage({ params }: { params: { id: string } }) {
   const [session, setSession] = useState<SessionRecord | null>(null);
+  const [coaching, setCoaching] = useState<any>(null);
+  const [isLoadingCoaching, setIsLoadingCoaching] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -22,6 +24,38 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
       cancelled = true;
     };
   }, [params.id]);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    
+    async function fetchCoaching() {
+      setIsLoadingCoaching(true);
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const res = await fetch(`${apiUrl}/api/report/${params.id}/coaching`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            transcripts: session.transcript_events || [],
+            scores: { final: session.final_score },
+            stress_level: session.stress_level || "none",
+            mode: session.mode
+          })
+        });
+        if (!res.ok) throw new Error("Failed to fetch coaching");
+        const data = await res.json();
+        if (!cancelled) setCoaching(data);
+      } catch (err) {
+        console.error("Coaching fetch failed:", err);
+      } finally {
+        if (!cancelled) setIsLoadingCoaching(false);
+      }
+    }
+    
+    fetchCoaching();
+    return () => { cancelled = true; };
+  }, [session]);
 
   const breakdown = useMemo(
     () => [
@@ -44,44 +78,81 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
         </Link>
       }
     >
-      <section className="grid gap-4 lg:grid-cols-3">
+      <section className="grid gap-6 lg:grid-cols-3">
         <GlassCard className="animate-fade-up lg:col-span-2">
-          <h2 className="mb-3 text-lg font-semibold">Rubric Breakdown</h2>
+          <h2 className="mb-4 text-xl font-bold tracking-tight text-white">Rubric Breakdown</h2>
           <div className="space-y-3">
             {breakdown.map((metric) => (
               <ProgressRow key={metric.label} label={metric.label} value={metric.value} />
             ))}
           </div>
-          <p className="mt-4 text-xs text-qace-muted">
-            Session mode: <span className="capitalize text-white">{session?.mode ?? "unknown"}</span> | Difficulty: {session?.difficulty ?? "unknown"}
-          </p>
+          <div className="mt-6 border-t border-white/10 pt-4 text-xs text-[var(--muted)] opacity-80 font-medium tracking-wide">
+            Session mode: <span className="capitalize text-white">{session?.mode ?? "unknown"}</span> • Difficulty: {session?.difficulty ?? "unknown"}
+          </div>
         </GlassCard>
 
         <GlassCard className="animate-fade-up-delayed">
-          <h2 className="text-lg font-semibold">Coach Notes</h2>
-          <ul className="mt-3 space-y-2 text-sm text-qace-muted">
-            <li>Open with a concise context statement in technical responses.</li>
-            <li>Anchor each answer to measurable impact where possible.</li>
-            <li>Maintain eye-line stability during complex explanations.</li>
-            <li>Reduce repeated transition phrases for smoother delivery.</li>
-          </ul>
+          <h2 className="mb-4 text-xl font-bold tracking-tight text-white">Coach Notes</h2>
+          {isLoadingCoaching ? (
+            <div className="mt-4 flex flex-col gap-3">
+              <div className="h-4 w-3/4 animate-pulse rounded bg-white/10" />
+              <div className="h-4 w-5/6 animate-pulse rounded bg-white/10" />
+              <div className="h-4 w-2/3 animate-pulse rounded bg-white/10" />
+            </div>
+          ) : coaching ? (
+            <div className="space-y-4 text-sm text-[var(--muted)]">
+               <div className="rounded-2xl border border-white/5 bg-black/40 p-4">
+                 <strong className="text-white block mb-1">General Analysis:</strong> {coaching.general_tip}
+               </div>
+               {coaching.stress_tip && <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 shadow-[0_0_15px_rgba(239,68,68,0.1)]">
+                 <strong className="text-red-400 block mb-1">Under Pressure:</strong> {coaching.stress_tip}
+               </div>}
+               {coaching.cv_tip && <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+                 <strong className="text-blue-400 block mb-1">CV Alignment:</strong> {coaching.cv_tip}
+               </div>}
+            </div>
+          ) : (
+            <div className="mt-3 text-sm text-[var(--muted)]">Not available for this session.</div>
+          )}
         </GlassCard>
       </section>
 
-      <section className="mt-4 grid gap-4 md:grid-cols-2">
+      {session?.stress_level && session.stress_level !== "none" && (
+        <section className="mt-6 grid gap-6 md:grid-cols-2">
+          <GlassCard className="animate-fade-up-delayed md:col-span-2">
+            <h3 className="mb-4 text-xl font-bold tracking-tight text-white">Stress Analytics ({session.stress_level})</h3>
+            <div className="grid gap-4 md:grid-cols-3 text-sm text-[var(--muted)]">
+               <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-5 shadow-[0_4px_20px_rgba(99,102,241,0.05)]">
+                 <p className="font-semibold text-white tracking-wide">Composure Delta</p>
+                 <p className="mt-2 text-indigo-200/80">Maintained relative calm despite sharp follow-ups.</p>
+               </div>
+               <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-5 shadow-[0_4px_20px_rgba(239,68,68,0.05)]">
+                 <p className="font-semibold text-white tracking-wide">Interruption Response</p>
+                 <p className="mt-2 text-red-200/80">Good recovery time after mid-utterance stops.</p>
+               </div>
+               <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-5 shadow-[0_4px_20px_rgba(16,185,129,0.05)]">
+                 <p className="font-semibold text-white tracking-wide">Silence Handling</p>
+                 <p className="mt-2 text-emerald-200/80">Pivoted answers confidently during dead silence.</p>
+               </div>
+            </div>
+          </GlassCard>
+        </section>
+      )}
+
+      <section className="mt-6 grid gap-6 md:grid-cols-2">
         <GlassCard className="animate-fade-up-delayed">
-          <h3 className="text-lg font-semibold">Suggested Rewrite</h3>
-          <p className="mt-3 text-sm text-qace-muted">
+          <h3 className="mb-3 text-xl font-bold tracking-tight text-white">Suggested Rewrite</h3>
+          <p className="mt-2 leading-relaxed text-sm text-[var(--muted)] italic border-l-2 border-white/20 pl-4 bg-white/5 py-2 px-3 rounded-r-xl">
             "I designed a cache invalidation strategy that reduced stale reads by 41% and improved API p95 latency by 120ms. I coordinated with frontend and infra teams, then monitored rollout with feature flags and fallback controls."
           </p>
         </GlassCard>
 
         <GlassCard className="animate-fade-up-delayed-2">
-          <h3 className="text-lg font-semibold">Next Drill Plan</h3>
-          <ol className="mt-3 space-y-2 text-sm text-qace-muted">
-            <li>1. 10-minute behavioral response compression practice.</li>
-            <li>2. Two follow-up technical scenarios with strict 90-second answers.</li>
-            <li>3. Re-run full mock interview and compare composure delta.</li>
+          <h3 className="mb-3 text-xl font-bold tracking-tight text-white">Next Drill Plan</h3>
+          <ol className="mt-2 space-y-3 text-sm text-[var(--muted)] font-medium list-decimal list-inside bg-black/40 p-4 rounded-2xl border border-white/5">
+            <li className="pl-1">10-minute behavioral response compression practice.</li>
+            <li className="pl-1">Two follow-up technical scenarios with strict 90-second answers.</li>
+            <li className="pl-1">Re-run full mock interview and compare composure delta.</li>
           </ol>
         </GlassCard>
       </section>

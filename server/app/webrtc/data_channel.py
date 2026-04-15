@@ -68,7 +68,43 @@ def send_status(channel: Any, status: str) -> None:
     send_event(channel, "status", {"message": status})
 
 
+def send_avatar_state(channel: Any, state: str) -> None:
+    """Send an avatar state command (AVATAR_COLD, AVATAR_IMPATIENT, AVATAR_SKEPTICAL, AVATAR_INTERRUPT)."""
+    send_event(channel, "avatar_state", {"state": state})
+
+
+def send_mic_gate(channel: Any, reason: str) -> None:
+    """Send a mic gate message to disable the client microphone."""
+    send_event(channel, "mic_gate", {"state": "disabled", "reason": reason})
+
+
+def send_mic_reopen(channel: Any, reason: str) -> None:
+    """Send a mic gate message to re-enable the client microphone."""
+    send_event(channel, "mic_gate", {"state": "enabled", "reason": reason})
+
+
+def send_stage_change(channel: Any, stage: str, metadata: dict | None = None) -> None:
+    """Notify client that the session stage has changed."""
+    send_event(channel, "stage_change", {"stage": stage, **(metadata or {})})
+
+
+def send_time_warning(channel: Any, remaining_minutes: int) -> None:
+    """Send a 5-minute warning to the client."""
+    send_event(channel, "time_warning", {"remaining_minutes": remaining_minutes})
+
+
+def send_session_ended(channel: Any, reason: str) -> None:
+    """Notify client that the interview loop has concluded naturally or via timeout."""
+    send_event(channel, "session_ended", {"reason": reason})
+
+
+def send_silence_prompt(channel: Any, text: str) -> None:
+    """Send a silence-triggered prompt (e.g. 'Take your time')."""
+    send_event(channel, "silence_prompt", {"text": text})
+
+
 def parse_au_telemetry(data: bytes) -> Optional[AUTelemetry]:
+
     """
     Parse binary AU telemetry packet (20 bytes).
     Format: [timestamp:uint32][AU4:f32][AU12:f32][AU45:f32][eye_contact:f32]

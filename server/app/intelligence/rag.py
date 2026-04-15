@@ -29,7 +29,24 @@ class RAGResult:
     retrieval_ms: float = 0.0
 
 
-def init_rag(chroma_dir: str) -> bool:
+def _resolve_embed_device(device_pref: str) -> str:
+    """Resolve embedding device with CPU-safe defaults on Windows."""
+    pref = (device_pref or "cpu").strip().lower()
+    if pref in {"cpu", "cuda", "mps"}:
+        return pref
+    if pref == "auto":
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                return "cuda"
+        except Exception:
+            pass
+        return "cpu"
+    return "cpu"
+
+
+def init_rag(chroma_dir: str, embed_device: str = "cpu") -> bool:
     """
     Initialise the ChromaDB persistent client and open the rubrics collection.
     Call once at server startup.  Returns True on success.
@@ -44,16 +61,33 @@ def init_rag(chroma_dir: str) -> bool:
         import chromadb
         from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
-        embed_fn = SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2",
-        )
+        resolved_device = _resolve_embed_device(embed_device)
+        try:
+            embed_fn = SentenceTransformerEmbeddingFunction(
+                model_name="all-MiniLM-L6-v2",
+                device=resolved_device,
+            )
+        except TypeError:
+            # Some chromadb builds expose `model_kwargs` instead of `device`.
+            try:
+                embed_fn = SentenceTransformerEmbeddingFunction(
+                    model_name="all-MiniLM-L6-v2",
+                    model_kwargs={"device": resolved_device},
+                )
+            except TypeError:
+                logger.warning(
+                    "RAG embedding function does not accept device/model_kwargs; using library defaults"
+                )
+                embed_fn = SentenceTransformerEmbeddingFunction(
+                    model_name="all-MiniLM-L6-v2",
+                )
         _chroma_client = chromadb.PersistentClient(path=str(chroma_path))
         _collection = _chroma_client.get_collection(
             name="rubrics",
             embedding_function=embed_fn,
         )
         count = _collection.count()
-        logger.info("RAG initialised ✓ (%d rubric chunks in ChromaDB)", count)
+        logger.info("RAG initialised ✓ (%d rubric chunks in ChromaDB, device=%s)", count, resolved_device)
         return True
     except ImportError:
         logger.warning("chromadb / sentence-transformers not installed — RAG disabled")

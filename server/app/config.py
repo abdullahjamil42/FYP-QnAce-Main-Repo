@@ -66,6 +66,7 @@ class Settings(BaseSettings):
         str(_REPO_ROOT / "data" / "chroma"),
         alias="QACE_CHROMA_DIR",
     )
+    rag_embed_device: str = Field("cpu", alias="QACE_RAG_EMBED_DEVICE")
     llm_model: str = Field("", alias="QACE_LLM_MODEL")
     llm_max_tokens: int = Field(120, alias="QACE_LLM_MAX_TOKENS")
     groq_model: str = Field("llama-3.3-70b-versatile", alias="QACE_GROQ_MODEL")
@@ -96,8 +97,8 @@ class Settings(BaseSettings):
         alias="QACE_INTERVIEWER_CLASSIFIER_TEMPERATURE",
     )
     interviewer_classifier_max_tokens: int = Field(
-        220,
-        alias="QACE_INTERVIEWER_CLASSIFIER_MAX_TOKENS",
+        150,
+        alias="QACE_INTERVIEW_CLASSIFIER_MAX_TOKENS",
     )
     interviewer_history_window: int = Field(3, alias="QACE_INTERVIEWER_HISTORY_WINDOW")
     interviewer_summary_max_chars: int = Field(

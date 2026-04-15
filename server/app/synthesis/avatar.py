@@ -251,7 +251,7 @@ def _generate_default_avatar() -> np.ndarray:
 def _draw_mouth(frame: np.ndarray, openness: float) -> None:
     """Draw an animated mouth on the avatar (openness 0-1)."""
     cx = AVATAR_W // 2
-    cy = AVATAR_H // 2 - 20 + 45
+    cy = AVATAR_H // 2 - 20 + 20  # Shifted up for photorealistic face alignment
     h = int(3 + openness * 16)
     for dy in range(-h // 2, h // 2 + 1):
         y = cy + dy

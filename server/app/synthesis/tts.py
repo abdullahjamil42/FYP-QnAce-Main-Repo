@@ -24,6 +24,10 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import numpy as np
+try:
+    import librosa
+except ImportError:
+    librosa = None
 
 logger = logging.getLogger("qace.tts")
 
@@ -204,6 +208,15 @@ def _load_chatterbox_model(device: str = "auto"):
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    if device == "cuda":
+        # Enable SDPA for optimized attention kernels
+        torch.backends.cuda.enable_flash_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+        torch.backends.cuda.enable_math_sdp(False)
+        logger.info("SDPA Kernels enabled: Flash=%s, MemEfficient=%s", 
+                    torch.backends.cuda.flash_sdp_enabled(),
+                    torch.backends.cuda.mem_efficient_sdp_enabled())
+
     logger.info("Loading ChatterBox Turbo TTS on %s …", device)
     t0 = time.perf_counter()
 
@@ -225,45 +238,62 @@ def _load_chatterbox_model(device: str = "auto"):
                 allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"],
             )
             model = ChatterboxTurboTTS.from_local(local_path, device)
+        
+        if device == "cuda":
+            # Problem 2 Fix: Force FP16 and move to device properly
+            try:
+                target = getattr(model, "model", model)
+                if hasattr(target, "half"):
+                    target = target.half()
+                if hasattr(target, "to"):
+                    target = target.to(device)
+                
+                if hasattr(model, "model"):
+                    model.model = target
+                else:
+                    model = target
+                
+                # Verify dtype
+                param_dtype = next(target.parameters()).dtype if hasattr(target, "parameters") else "unknown"
+                logger.info("ChatterBox model cast to half precision ✓ (dtype: %s)", param_dtype)
+            except Exception as e:
+                logger.warning("Could not cast ChatterBox model to half precision: %s", e)
     finally:
         torch.backends.cudnn.enabled = prev_cudnn
 
-    # Optional runtime optimizations for lower per-call latency.
+    # FP16 is already applied above via model.half().to(device).
+    # Skip the duplicate env-var-gated half() — double-casting can corrupt state.
+
+    # torch.compile: disabled by default on Windows (known to crash with
+    # reduce-overhead mode).  Set QACE_CHATTERBOX_COMPILE=1 to force-enable.
     if device == "cuda":
-        target_module = None
-        try:
-            import torch.nn as nn
-
-            if isinstance(getattr(model, "model", None), nn.Module):
-                target_module = model.model
-            elif isinstance(model, nn.Module):
-                target_module = model
-        except Exception:
+        default_compile = "0" if os.name == "nt" else "1"
+        use_compile = os.environ.get("QACE_CHATTERBOX_COMPILE", default_compile).strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        if use_compile and hasattr(torch, "compile"):
             target_module = None
-
-        use_half = os.environ.get("QACE_CHATTERBOX_HALF", "1").strip().lower() in {
-            "1", "true", "yes", "on"
-        }
-        if target_module is not None and use_half:
             try:
-                target_module.half()
-                logger.info("ChatterBox runtime: fp16 enabled")
-            except Exception as exc:
-                logger.warning("ChatterBox fp16 cast failed (%s) — continuing", exc)
+                import torch.nn as nn
+                if isinstance(getattr(model, "model", None), nn.Module):
+                    target_module = model.model
+                elif isinstance(model, nn.Module):
+                    target_module = model
+            except Exception:
+                target_module = None
 
-        use_compile = os.environ.get("QACE_CHATTERBOX_COMPILE", "1").strip().lower() in {
-            "1", "true", "yes", "on"
-        }
-        if target_module is not None and use_compile and hasattr(torch, "compile"):
-            try:
-                compiled = torch.compile(target_module, mode="reduce-overhead")
-                if getattr(model, "model", None) is target_module:
-                    model.model = compiled
-                else:
-                    model = compiled
-                logger.info("ChatterBox runtime: torch.compile enabled (reduce-overhead)")
-            except Exception as exc:
-                logger.warning("ChatterBox compile failed (%s) — continuing", exc)
+            if target_module is not None:
+                try:
+                    compiled = torch.compile(target_module, mode="reduce-overhead")
+                    if getattr(model, "model", None) is target_module:
+                        model.model = compiled
+                    else:
+                        model = compiled
+                    logger.info("ChatterBox runtime: torch.compile enabled (reduce-overhead)")
+                except Exception as exc:
+                    logger.warning("ChatterBox compile failed (%s) — continuing without compile", exc)
+        else:
+            logger.info("ChatterBox runtime: torch.compile skipped (os=%s, env=%s)", os.name, default_compile)
 
     ms = (time.perf_counter() - t0) * 1000.0
     logger.info("ChatterBox Turbo loaded ✓ on %s (%.0fms)", device, ms)
@@ -347,13 +377,45 @@ def _synthesize_silence(duration_s: float = 0.3) -> TTSResult:
 
 def _float_audio_to_pcm_int16(audio: np.ndarray) -> np.ndarray:
     audio = np.asarray(audio)
-    if audio.ndim > 1:
+
+    # Normalize channel layouts into a single mono stream.
+    if audio.ndim == 2:
+        # Common layouts: [channels, samples] or [samples, channels]
+        if audio.shape[0] <= 4:
+            audio = audio.mean(axis=0)
+        elif audio.shape[1] <= 4:
+            audio = audio.mean(axis=1)
+        else:
+            audio = audio.reshape(-1)
+    elif audio.ndim > 2:
         audio = audio.reshape(-1)
+
     if audio.dtype == np.int16:
         return audio
-    audio = np.clip(audio.astype(np.float32), -1.0, 1.0)
+
+    audio = audio.astype(np.float32)
+    # Guard against model-instability artifacts (NaN/Inf) that become static.
+    audio = np.nan_to_num(audio, nan=0.0, posinf=1.0, neginf=-1.0)
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 1.0:
+        audio = audio / peak
+
+    audio = np.clip(audio, -1.0, 1.0)
     return (audio * 32767.0).astype(np.int16)
 
+def time_stretch_audio(pcm: np.ndarray, sample_rate: int, rate: float) -> np.ndarray:
+    if rate == 1.0 or len(pcm) == 0:
+        return pcm
+    try:
+        if librosa is None:
+            logger.warning("librosa not installed, skipping time_stretch")
+            return pcm
+        audio_f32 = pcm.astype(np.float32) / 32768.0
+        stretched = librosa.effects.time_stretch(y=audio_f32, rate=rate)
+        return _float_audio_to_pcm_int16(stretched)
+    except Exception as e:
+        logger.warning("time_stretch_audio failed: %s", e)
+        return pcm
 
 # ---------------------------------------------------------------------------
 # Engine class
@@ -381,20 +443,37 @@ class TTSEngine:
         self.chatterbox_model: Any = None
         self.chatterbox_device = chatterbox_device
         self._cb_lock = asyncio.Lock()
+        self._cb_fail_count = 0  # 3-strike counter for ChatterBox failures
+        self._CB_MAX_FAILURES = 3
         self._engine_name = self._detect_engine()
 
     def _disable_chatterbox(self, reason: str) -> None:
+        """Track ChatterBox failures. Only permanently disable after 3 consecutive failures."""
         if self._engine_name != "chatterbox-turbo":
             return
+        self._cb_fail_count += 1
+        if self._cb_fail_count < self._CB_MAX_FAILURES:
+            logger.warning(
+                "ChatterBox TTS failed (%s) — strike %d/%d, will retry next call",
+                reason, self._cb_fail_count, self._CB_MAX_FAILURES,
+            )
+            return
+        # Permanent disable after 3 strikes
         self.chatterbox_model = None
         try:
             import edge_tts  # noqa: F401
             self._engine_name = "edge-tts"
         except ImportError:
             self._engine_name = "tone-generator"
-        logger.warning(
-            "Disabling ChatterBox TTS (%s) — switching to %s", reason, self._engine_name
+        logger.error(
+            "Permanently disabling ChatterBox TTS after %d failures (%s) — switching to %s",
+            self._cb_fail_count, reason, self._engine_name,
         )
+
+    def _reset_cb_fail_count(self) -> None:
+        """Reset failure counter on successful synthesis."""
+        if self._cb_fail_count > 0:
+            self._cb_fail_count = 0
 
     def _detect_engine(self) -> str:
         # If explicitly set to edge, skip ChatterBox
@@ -430,20 +509,75 @@ class TTSEngine:
     def engine_name(self) -> str:
         return self._engine_name
 
-    async def synthesize(self, text: str) -> TTSResult:
+    async def synthesize(self, text: str, stress_level: str = "none") -> TTSResult:
         """Synthesize *text* to PCM int16 audio."""
         if not text or not text.strip():
             return _synthesize_silence(0.2)
 
+        rate = 1.0
+        if stress_level == "brutal":
+            rate = 1.22
+        elif stress_level == "high":
+            rate = 1.12
+
+        res = None
         if self._engine_name == "chatterbox-turbo":
-            return await self._synthesize_chatterbox(text)
-        if self._engine_name == "edge-tts":
+            res = await self._synthesize_chatterbox(text)
+        elif self._engine_name == "edge-tts":
             try:
-                return await _synthesize_edge(text, self.voice)
+                # edge_tts can do its own rate mapping if we pass rate="+12%" but for consistency we use librosa 
+                # actually let's just stick to time_stretch_audio to avoid edge cases with edge_tts rate bugs
+                res = await _synthesize_edge(text, self.voice)
             except Exception as exc:
                 logger.warning("edge-tts failed (%s) — falling back to tone", exc)
-                return _synthesize_tone(text)
-        return _synthesize_tone(text)
+                res = _synthesize_tone(text)
+        else:
+            res = _synthesize_tone(text)
+            
+        if rate != 1.0 and res and res.audio_pcm is not None:
+            # librosa-based phase vocoder can create metallic artifacts on
+            # ChatterBox output; keep ChatterBox un-stretched for clarity.
+            if self._engine_name != "chatterbox-turbo":
+                stretched_pcm = time_stretch_audio(res.audio_pcm, res.sample_rate, rate)
+                # Recompute duration
+                new_dur = len(stretched_pcm) / max(res.sample_rate, 1)
+                res.audio_pcm = stretched_pcm
+                res.duration_s = new_dur
+            
+        return res
+
+    async def synthesize_warmup(self) -> None:
+        """Force CUDA kernel compilation with a dummy synthesis."""
+        if self._engine_name != "chatterbox-turbo":
+            return
+        logger.info("Performing ChatterBox warmup synthesis …")
+        dummy_text = "This is a warm up synthesis to compile CUDA kernels for low latency."
+        await self.synthesize(dummy_text)
+        logger.info("ChatterBox warmup complete ✓")
+
+    async def synthesize_filler_cache(self) -> list[np.ndarray]:
+        """Pre-synthesize natural filler phrases to eliminate start-of-turn gaps."""
+        phrases = [
+            "right", "okay", "got it", "let me think about that",
+            "interesting", "okay so", "right okay", "sure",
+            "alright", "I see", "okay let me think", "fair enough",
+            "understood", "okay go on", "right and", "sure sure"
+        ]
+        if self._engine_name != "chatterbox-turbo":
+            # Fallback to empty if not using local GPU TTS to avoid blocking startup on edge-tts
+            return []
+
+        logger.info("Pre-synthesizing %d filler phrases …", len(phrases))
+        t0 = time.perf_counter()
+        buffers: list[np.ndarray] = []
+        for phrase in phrases:
+            res = await self.synthesize(phrase)
+            if res.audio_pcm is not None and len(res.audio_pcm) > 0:
+                buffers.append(res.audio_pcm)
+        
+        ms = (time.perf_counter() - t0) * 1000.0
+        logger.info("Filler cache ready ✓ (%d clips, %.0fms)", len(buffers), ms)
+        return buffers
 
     async def _synthesize_chatterbox(self, text: str) -> TTSResult:
         """Synthesize with ChatterBox Turbo TTS."""
@@ -485,6 +619,7 @@ class TTSEngine:
                 dur = len(pcm) / max(sr, 1)
                 ms = (time.perf_counter() - t0) * 1000.0
                 logger.info("chatterbox-turbo: %.1fs audio in %.0fms (%d chars)", dur, ms, len(text))
+                self._reset_cb_fail_count()
                 return TTSResult(pcm, sr, dur, ms, "chatterbox-turbo")
             except asyncio.TimeoutError:
                 ms = (time.perf_counter() - t0) * 1000.0

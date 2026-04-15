@@ -39,6 +39,7 @@ class EndOfSpeechDetector:
         silence_ms: int = 200,
         min_speech_s: float = 0.5,
         silero_session: Any = None,
+        on_speech_start: Optional[Callable[[], None]] = None,
         on_speech_end: Optional[Callable[[np.ndarray], None]] = None,
         semantic_turn_detector: Any = None,
         partial_transcript_provider: Optional[Callable[[], str]] = None,
@@ -46,6 +47,7 @@ class EndOfSpeechDetector:
         self.silence_threshold = int(silence_ms / 1000.0 * SAMPLE_RATE)
         self.min_speech_samples = int(min_speech_s * SAMPLE_RATE)
         self.silero = silero_session
+        self.on_speech_start = on_speech_start
         self.on_speech_end = on_speech_end
         # Optional Phase-advanced hooks are accepted for compatibility.
         self.semantic_turn_detector = semantic_turn_detector
@@ -98,6 +100,12 @@ class EndOfSpeechDetector:
                 self._speech_start_sample = self._total_samples
                 self._speech_buffer.clear()
                 logger.debug("Speech start at sample %d", self._total_samples)
+                if self.on_speech_start:
+                    try:
+                        self.on_speech_start()
+                    except Exception as exc:
+                        logger.error("on_speech_start error: %s", exc)
+                        
             self._silence_samples = 0
             self._speech_buffer.append(frame.copy())
         else:
@@ -105,7 +113,7 @@ class EndOfSpeechDetector:
                 self._silence_samples += n
                 self._speech_buffer.append(frame.copy())  # include trailing silence
 
-                if self._silence_samples >= self.silence_threshold:
+                if self._should_fire_eos():
                     speech_samples = self._total_samples - self._speech_start_sample
                     if speech_samples >= self.min_speech_samples:
                         self._fire_eos()
@@ -234,6 +242,41 @@ class EndOfSpeechDetector:
         """Simple RMS energy threshold (fallback)."""
         rms = float(np.sqrt(np.mean(chunk.astype(np.float32) ** 2)))
         return rms > ENERGY_THRESHOLD
+
+    def _should_fire_eos(self) -> bool:
+        """Return True when silence (and optional semantic gate) ends a turn."""
+        if self._silence_samples < self.silence_threshold:
+            return False
+
+        if self.semantic_turn_detector is None:
+            return True
+
+        silence_ms = int(self._silence_samples * 1000.0 / SAMPLE_RATE)
+        transcript = ""
+        if self.partial_transcript_provider is not None:
+            try:
+                transcript = str(self.partial_transcript_provider() or "")
+            except Exception as exc:
+                logger.debug("partial transcript provider failed (%s)", exc)
+                transcript = ""
+
+        try:
+            should_end = bool(
+                self.semantic_turn_detector.evaluate_turn(silence_ms, transcript)
+            )
+            logger.debug(
+                "Semantic gate: silence=%dms transcript_chars=%d decision=%s",
+                silence_ms,
+                len(transcript),
+                should_end,
+            )
+            return should_end
+        except Exception as exc:
+            logger.warning(
+                "Semantic turn evaluation failed (%s) — using silence-only VAD",
+                exc,
+            )
+            return True
 
     # ── Helpers ──
 

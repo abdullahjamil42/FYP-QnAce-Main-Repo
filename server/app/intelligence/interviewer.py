@@ -25,6 +25,14 @@ MODES = {
     "CONFRONT",
     "ACKNOWLEDGE_IDK",
     "REFRAME",
+    "SKEPTIC",
+    "BULLDOZE",
+    "MEMORY_PRESS",
+    "PRESSURE_CLOCK",
+    "DEAD_SILENCE",
+    "CV_VERIFY",
+    "ACHIEVEMENT_PROBE",
+    "CAREER_PROBE",
 }
 
 ALLOWED_FLAGS = {"contradiction", "overclaim", "bluff", "hint-seeking", "hostile"}
@@ -355,17 +363,24 @@ async def _collect_stream(
     return LLMCallResult(text="".join(tokens).strip(), ttft_ms=round(ttft, 1), total_ms=round(total, 1))
 
 
-def _classifier_system_prompt() -> str:
-    return (
+def _classifier_system_prompt(stage: str = "", stress_level: str = "none") -> str:
+    base = (
         "You are an interview mode classifier. Return JSON only with no prose. "
         "Allowed modes: ADVANCE, PROBE_DEPTH, PROBE_GAP, REDIRECT, CHALLENGE, RESCUE, "
-        "INTERRUPT, CONFRONT, ACKNOWLEDGE_IDK, REFRAME. "
+        "INTERRUPT, CONFRONT, ACKNOWLEDGE_IDK, REFRAME, ENCOURAGE, CLARIFY, WRAP_UP, HYPOTHETICAL, "
+        "SKEPTIC, BULLDOZE, MEMORY_PRESS, PRESSURE_CLOCK, DEAD_SILENCE, CV_VERIFY, ACHIEVEMENT_PROBE, CAREER_PROBE. "
         "Output schema: {\"mode\": string, \"evidence\": string, \"follow_up_anchor\": string, "
         "\"active_flags\": [string]}. "
         "Use only active_flags from: contradiction, overclaim, bluff, hint-seeking, hostile. "
         "Evidence must be one sentence. Follow_up_anchor must be a concrete phrase from candidate text. "
         "Never output markdown. Never output anything other than a single valid JSON object."
     )
+    if stage == "WRAP_UP":
+        base += " CRITICAL: The interview is in the WRAP_UP stage. Strongly bias your classification toward the WRAP_UP mode."
+        
+    if stress_level in ("high", "brutal"):
+        base += " CRITICAL: Stress level is high. Bias toward SKEPTIC, BULLDOZE, MEMORY_PRESS, and CHALLENGE."
+    return base
 
 
 def _parse_classifier_output(text: str) -> Optional[dict[str, Any]]:
@@ -413,10 +428,27 @@ def _parse_classifier_output(text: str) -> Optional[dict[str, Any]]:
     }
 
 
-def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str]) -> str:
+def _build_stress_tone_prompt(stress_level: str) -> str:
+    if stress_level == "mild":
+        return "Tone is professional but demanding. Do not use affirmations or reflexive praise. Keep follow-ups dry and direct. "
+    elif stress_level == "high":
+        return "Tone is curt and confrontational. Provide no acknowledgments. Use phrases like 'Bottom line?' or 'Get to the point.'. "
+    elif stress_level == "brutal":
+        return "Tone is relentlessly skeptical, cold, and challenging. Dismiss unquantified claims immediately. "
+    else:
+        return "Tone is warm, direct, curious, and professional. "
+
+def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str], stress_level: str = "none") -> str:
+    tone = _build_stress_tone_prompt(stress_level)
+    if mode == "CHALLENGE" or "bluff" in active_flags:
+        tone = "Tone is firm, forensic, and skeptical. "
+    elif mode == "ENCOURAGE":
+        tone = "Tone is exceptionally warm, patient, and supportive. "
+    elif mode == "WRAP_UP":
+        tone = "Tone is gracious, conclusive, and highly welcoming. "
+        
     base = (
-        "You are a senior interviewer at a competitive software company. "
-        "Tone is warm, direct, curious, and professional. "
+        f"You are a senior interviewer at a competitive software company. {tone}"
         "Do not use bullet points, headers, or lists. "
         "Do not say great answer, interesting, absolutely, or reflexive praise. "
         "Do not reveal rubric or ideal answer. "
@@ -425,7 +457,7 @@ def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str]) 
 
     mode_directives = {
         "ADVANCE": (
-            "Acknowledge briefly in one clause, then transition naturally to the next question. "
+            "Acknowledge briefly in one clause, then use a transition phrase like 'Moving on to...' or 'Let's switch gears...' before the next question. "
             "Keep momentum and avoid over-praise."
         ),
         "PROBE_DEPTH": (
@@ -464,6 +496,46 @@ def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str]) 
         "REFRAME": (
             "Candidate asked for clarification. Clarify the ambiguity directly without repeating the whole question, "
             "then invite their answer."
+        ),
+        "ENCOURAGE": (
+            "Candidate seems hesitant or lacks confidence. "
+            "Validate their thought process and provide a gentle, supportive nudge to keep going."
+        ),
+        "CLARIFY": (
+            "Candidate gave a disorganized or confusing answer. "
+            "Ask them to explain a specific piece of their logic again more simply."
+        ),
+        "WRAP_UP": (
+            "The technical portion of the interview is concluding. "
+            "Provide a warm closing statement acknowledging their effort, and ask if they have any questions for you."
+        ),
+        "HYPOTHETICAL": (
+            "Shift the current topic into a new 'what-if' hypothetical scenario to test adaptability. "
+            "Keep the scenario realistic to the current topic."
+        ),
+        "SKEPTIC": (
+            "Pick one concrete claim the candidate made and challenge it directly. Express doubt about its effectiveness."
+        ),
+        "BULLDOZE": (
+            "Cut the candidate off. Start with 'Let me stop you there.' and force them to answer a very narrow question."
+        ),
+        "MEMORY_PRESS": (
+            "Reference something they said 2-4 turns ago. Challenge them on whether their current answer is consistent with it."
+        ),
+        "PRESSURE_CLOCK": (
+            "Create a fake time constraint. Say 'We are running out of time, I need the short answer' and ask a tough question."
+        ),
+        "DEAD_SILENCE": (
+            "Do not output spoken text. This mode represents intentional silence. The frontend will handle the silence delay."
+        ),
+        "CV_VERIFY": (
+            "Reference their CV explicitly. Ask them to reconcile a discrepancy between what they just said and their resume."
+        ),
+        "ACHIEVEMENT_PROBE": (
+            "Drill aggressively into a specific metric or achievement listed on their CV context. Ask how they achieved that exact number."
+        ),
+        "CAREER_PROBE": (
+            "Ask a probing, potentially uncomfortable question about their career transitions, gaps, or motivations based on the CV."
         ),
     }
 
@@ -507,6 +579,7 @@ def _fallback_classification(
     text_quality_score: float,
     active_flags: list[str],
     monologue_flag: bool,
+    stress_level: str = "none",
 ) -> dict[str, Any]:
     answer = _normalize_text(transcript)
     evidence = "Selected via deterministic fallback logic."
@@ -521,7 +594,7 @@ def _fallback_classification(
 
     if monologue_flag:
         return {
-            "mode": "INTERRUPT",
+            "mode": "BULLDOZE" if stress_level in ("high", "brutal") else "INTERRUPT",
             "evidence": "Candidate produced a long monologue with low turn efficiency.",
             "follow_up_anchor": anchor,
             "active_flags": active_flags,
@@ -538,7 +611,7 @@ def _fallback_classification(
     elif "bluff" in active_flags:
         mode = "CHALLENGE"
     elif text_quality_score >= 78.0 and rag_relevance >= 0.45:
-        mode = "ADVANCE"
+        mode = "SKEPTIC" if stress_level in ("high", "brutal") else "ADVANCE"
     elif text_quality_score >= 60.0:
         mode = "PROBE_DEPTH"
     else:
@@ -586,48 +659,53 @@ def _fallback_spoken(
         return f"Understood. Let us keep momentum with a related angle. {next_question}"
     if mode == "REFRAME":
         return "Good question. Focus on the concrete decisions and trade-offs you made, not generic theory. Can you answer it from that angle?"
+    if mode == "ENCOURAGE":
+        return "You're on the right track. Keep going with that thought."
+    if mode == "CLARIFY":
+        return "Could you break that down a bit more simply for me?"
+    if mode == "WRAP_UP":
+        return "Got it. That concludes the technical portion of our interview. Do you have any questions for me?"
+    if mode == "HYPOTHETICAL":
+        return f"Interesting. What if the situation was slightly different? {next_question}"
+    if mode == "SKEPTIC":
+        return f"I'm not entirely convinced by that. How exactly did '{anchor}' move the needle?"
+    if mode == "BULLDOZE":
+        return f"Let me stop you right there. What is the bottom line on {anchor}?"
+    if mode == "MEMORY_PRESS":
+        return f"Wait, earlier you said something else. Does this new answer about {anchor} still hold up?"
+    if mode == "PRESSURE_CLOCK":
+        return f"We have very little time left. Give me a short answer on {anchor}."
+    if mode == "DEAD_SILENCE":
+        return ""
+    if mode == "CV_VERIFY":
+        return "Your CV says something slightly different. Can you clarify?"
+    if mode == "ACHIEVEMENT_PROBE":
+        return "You listed a strong metric on your resume. How exactly did you achieve it?"
+    if mode == "CAREER_PROBE":
+        return "Looking at your work history, what was the real reason behind that transition?"
     return next_question
 
-
-async def generate_interviewer_turn(
+async def classify_interviewer_turn(
     *,
     transcript: str,
     current_question: str,
-    ideal_answer_rubric: str,
-    rag_passages: list[str],
-    rag_distances: list[float],
-    vocal_confidence: float,
-    text_quality_score: float,
-    text_quality_label: str,
     conversation_history: list[dict[str, Any]] | None,
     previous_mode: str,
     session_state: Optional[dict[str, Any]],
     monologue_flag: bool,
-    next_question: str,
     settings: Any,
-    on_generator_sentence_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
+    stage: str = "",
+    stress_level: str = "none",
 ) -> dict[str, Any]:
-    """Run classifier call then generator call and update persistent interviewer state."""
+    """Run classifier call (mode selection) only, decoupled from heavy perception/extraction."""
     state = _ensure_state(session_state)
-
     history = list(conversation_history or state.get("turn_history", []))
     history_window = max(1, int(getattr(settings, "interviewer_history_window", 3)))
-    summary_max_chars = max(300, int(getattr(settings, "interviewer_summary_max_chars", 1200)))
-
-    q_stats = _question_stats(state, current_question)
-    rag_relevance = _estimate_rag_relevance(rag_distances)
-
-    turn_index = len(history) + 1
-    new_claims = _extract_claims(transcript, current_question, turn_index)
-    contradiction_evidence = _find_contradiction(new_claims, state.get("key_claims", []))
 
     active_flags: list[str] = []
-    if contradiction_evidence:
-        active_flags.append("contradiction")
+    # Seed flags based on transcript alone (without scoring)
     if _detect_overclaim(transcript):
         active_flags.append("overclaim")
-    if _detect_bluff(transcript, vocal_confidence, text_quality_score, rag_relevance):
-        active_flags.append("bluff")
     if _detect_hint_seeking(transcript):
         active_flags.append("hint-seeking")
     if _detect_hostile(transcript):
@@ -646,11 +724,6 @@ async def generate_interviewer_turn(
     classifier_payload = {
         "candidate_transcript": _normalize_text(transcript),
         "current_question": _normalize_text(current_question),
-        "ideal_answer_rubric": _normalize_text(ideal_answer_rubric)[:1200],
-        "rag_relevance": round(rag_relevance, 3),
-        "vocal_confidence": round(_clamp(vocal_confidence, 0.0, 1.0), 3),
-        "text_quality_score": round(_clamp(text_quality_score, 0.0, 100.0), 1),
-        "text_quality_label": _normalize_text(text_quality_label),
         "recent_turns": recent_turns,
         "previous_mode": previous_mode_norm,
         "seed_flags": active_flags,
@@ -661,10 +734,10 @@ async def generate_interviewer_turn(
             cls_model = getattr(settings, "interviewer_classifier_model", "")
             cls_cfg = _override_model(provider, cls_model)
             cls_temp = _safe_float(getattr(settings, "interviewer_classifier_temperature", 0.0), 0.0)
-            cls_tokens = int(getattr(settings, "interviewer_classifier_max_tokens", 220))
+            cls_tokens = int(getattr(settings, "interviewer_classifier_max_tokens", 150))
             cls_call = await _collect_stream(
                 json.dumps(classifier_payload, ensure_ascii=True),
-                _classifier_system_prompt(),
+                _classifier_system_prompt(stage, stress_level),
                 cls_cfg,
                 temperature=_clamp(cls_temp, 0.0, 1.0),
                 max_tokens=max(80, cls_tokens),
@@ -676,14 +749,16 @@ async def generate_interviewer_turn(
             logger.warning("Classifier call failed: %s", exc)
 
     if classifier_result is None:
+        # Pass dummy values for perception-based fallback triggers (RAG relevance, confidence)
         classifier_result = _fallback_classification(
             transcript=transcript,
             current_question=current_question,
-            rag_relevance=rag_relevance,
-            vocal_confidence=vocal_confidence,
-            text_quality_score=text_quality_score,
+            rag_relevance=0.0,
+            vocal_confidence=0.5,
+            text_quality_score=60.0,
             active_flags=active_flags,
             monologue_flag=monologue_flag,
+            stress_level=stress_level,
         )
 
     mode = str(classifier_result.get("mode", "PROBE_GAP")).upper()
@@ -694,10 +769,61 @@ async def generate_interviewer_turn(
         if f not in cls_flags:
             cls_flags.append(f)
 
-    # Hard safety overrides.
+    # Hard safety overrides
     if monologue_flag:
         mode = "INTERRUPT"
-    if "contradiction" in cls_flags:
+
+    return {
+        "mode": mode,
+        "evidence": evidence,
+        "follow_up_anchor": follow_up_anchor,
+        "active_flags": cls_flags,
+        "classifier_ms": round(classifier_ms, 1),
+        "classifier_ttft_ms": round(classifier_ttft_ms, 1),
+    }
+
+
+async def generate_interviewer_response(
+    *,
+    transcript: str,
+    current_question: str,
+    classifier_result: dict[str, Any],
+    ideal_answer_rubric: str,
+    rag_passages: list[str],
+    rag_distances: list[float],
+    vocal_confidence: float,
+    text_quality_score: float,
+    text_quality_label: str,
+    conversation_history: list[dict[str, Any]] | None,
+    session_state: Optional[dict[str, Any]],
+    next_question: str,
+    settings: Any,
+    on_generator_sentence_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
+    stress_level: str = "none",
+    cv_context: str = "",
+) -> dict[str, Any]:
+    """Run generator call using pre-selected mode and full perception data."""
+    state = _ensure_state(session_state)
+    history = list(conversation_history or state.get("turn_history", []))
+    history_window = max(1, int(getattr(settings, "interviewer_history_window", 3)))
+    summary_max_chars = max(300, int(getattr(settings, "interviewer_summary_max_chars", 1200)))
+    
+    q_stats = _question_stats(state, current_question)
+    rag_relevance = _estimate_rag_relevance(rag_distances)
+    
+    turn_index = len(history) + 1
+    new_claims = _extract_claims(transcript, current_question, turn_index)
+    contradiction_evidence = _find_contradiction(new_claims, state.get("key_claims", []))
+
+    mode = classifier_result["mode"]
+    evidence = classifier_result["evidence"]
+    follow_up_anchor = classifier_result["follow_up_anchor"]
+    cls_flags = classifier_result["active_flags"]
+
+    # Late addition of contradiction flag if perception/RAG find it
+    if contradiction_evidence:
+        if "contradiction" not in cls_flags:
+            cls_flags.append("contradiction")
         mode = "CONFRONT"
 
     redirect_count = int(q_stats.get("redirects", 0)) + (1 if mode == "REDIRECT" else 0)
@@ -710,12 +836,13 @@ async def generate_interviewer_turn(
     if mode == "INTERRUPT":
         state["interrupt_count"] = int(state.get("interrupt_count", 0)) + 1
 
-    # Generator sees compressed session arc summary.
     session_summary = state.get("session_summary", "")
     if not session_summary:
         session_summary = _compress_session_summary(history, summary_max_chars)
 
-    generator_prompt = _build_mode_prompt(mode, redirect_count, cls_flags)
+    generator_prompt = _build_mode_prompt(mode, redirect_count, cls_flags, stress_level=stress_level)
+    recent_turns = _last_n_turns(history, history_window)
+    
     generator_payload = {
         "mode": mode,
         "evidence": evidence,
@@ -738,11 +865,15 @@ async def generate_interviewer_turn(
         "idk_count": int(state.get("idk_count", 0)),
         "interrupt_count": int(state.get("interrupt_count", 0)),
     }
+    
+    if cv_context:
+        generator_payload["cv_context"] = cv_context
 
     spoken_response = ""
     generator_ttft_ms = 0.0
     generator_ms = 0.0
     streamed_chunk_count = 0
+    provider = resolve_provider_config(settings)
 
     if provider is not None:
         try:
@@ -814,7 +945,6 @@ async def generate_interviewer_turn(
             except Exception as exc:
                 logger.warning("Fallback chunk callback failed (%s)", exc)
 
-    # Keep TTS-friendly output constraints.
     spoken_response = re.sub(r"\s+", " ", spoken_response).strip()
     spoken_response = spoken_response.replace(":", "")
 
@@ -842,10 +972,124 @@ async def generate_interviewer_turn(
         "active_flags": cls_flags,
         "state": state,
         "history": state["turn_history"],
-        "classifier_ms": round(classifier_ms, 1),
-        "classifier_ttft_ms": round(classifier_ttft_ms, 1),
         "generator_ms": round(generator_ms, 1),
         "llm_ttft_ms": round(generator_ttft_ms, 1),
         "streamed_chunk_count": streamed_chunk_count,
         "rag_relevance": round(rag_relevance, 3),
+        "classifier_ms": round(classifier_result.get("classifier_ms", 0.0), 1),
+        "classifier_ttft_ms": round(classifier_result.get("classifier_ttft_ms", 0.0), 1),
     }
+
+
+async def generate_interviewer_turn(
+    *,
+    transcript: str,
+    current_question: str,
+    ideal_answer_rubric: str,
+    rag_passages: list[str],
+    rag_distances: list[float],
+    vocal_confidence: float,
+    text_quality_score: float,
+    text_quality_label: str,
+    conversation_history: list[dict[str, Any]] | None,
+    previous_mode: str,
+    session_state: Optional[dict[str, Any]],
+    monologue_flag: bool,
+    next_question: str,
+    settings: Any,
+    stage: str = "",
+    on_generator_sentence_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
+    stress_level: str = "none",
+    cv_context: str = "",
+) -> dict[str, Any]:
+    """Backward compatibility wrapper: runs classify then generate sequentially."""
+    classifier_result = await classify_interviewer_turn(
+        transcript=transcript,
+        current_question=current_question,
+        conversation_history=conversation_history,
+        previous_mode=previous_mode,
+        session_state=session_state,
+        monologue_flag=monologue_flag,
+        settings=settings,
+        stage=stage,
+        stress_level=stress_level,
+    )
+    return await generate_interviewer_response(
+        transcript=transcript,
+        current_question=current_question,
+        classifier_result=classifier_result,
+        ideal_answer_rubric=ideal_answer_rubric,
+        rag_passages=rag_passages,
+        rag_distances=rag_distances,
+        vocal_confidence=vocal_confidence,
+        text_quality_score=text_quality_score,
+        text_quality_label=text_quality_label,
+        conversation_history=conversation_history,
+        session_state=session_state,
+        next_question=next_question,
+        settings=settings,
+        on_generator_sentence_chunk=on_generator_sentence_chunk,
+        stress_level=stress_level,
+        cv_context=cv_context,
+    )
+
+
+async def generate_small_talk_opener(settings: Any) -> str:
+    """Generate a natural, short small talk opener using the LLM."""
+    default_opener = "Hi there. Thanks for joining. How is your day going so far?"
+    provider = resolve_provider_config(settings)
+    if not provider:
+        return default_opener
+
+    system_prompt = (
+        "You are an AI interviewer starting a session. Generate a single, short, warm small-talk opening. "
+        "For example, ask how their day is going or thank them for making time. "
+        "Maximum 2 sentences. No lists, no headers, be conversational and natural."
+    )
+    try:
+        gen_model = getattr(settings, "interviewer_generator_model", "")
+        gen_cfg = _override_model(provider, gen_model)
+        
+        call_res = await _collect_stream(
+            transcript="Start the interview.",
+            system_prompt=system_prompt,
+            provider_config=gen_cfg,
+            temperature=0.7,
+            max_tokens=50,
+        )
+        if call_res.text:
+            return call_res.text
+    except Exception as exc:
+        logger.warning("Failed to generate small talk opener: %s", exc)
+        
+    return default_opener
+
+async def generate_rephrased_question(question: str, settings: Any) -> str:
+    """Generate a simpler, rephrased version of the question for candidate silence."""
+    provider = resolve_provider_config(settings)
+    if not provider:
+        return "Let me ask this a different way: " + question
+
+    system_prompt = (
+        "You are an AI interviewer. The candidate has been silent for 15 seconds. "
+        "Rephrase the following question to be simpler, or approach it from a different angle "
+        "without changing the core topic. Start your response with 'Let me put it another way: ' "
+        "or 'Let's try this: '. Maximum 2 sentences. No lists."
+    )
+    try:
+        gen_model = getattr(settings, "interviewer_generator_model", "")
+        gen_cfg = _override_model(provider, gen_model)
+        
+        call_res = await _collect_stream(
+            transcript=question,
+            system_prompt=system_prompt,
+            provider_config=gen_cfg,
+            temperature=0.6,
+            max_tokens=60,
+        )
+        if call_res.text:
+            return call_res.text
+    except Exception as exc:
+        logger.warning("Failed to generate rephrased question: %s", exc)
+        
+    return "Let me ask this a different way: " + question

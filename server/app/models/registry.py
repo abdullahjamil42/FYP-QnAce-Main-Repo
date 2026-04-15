@@ -24,6 +24,7 @@ face_model: Any = None
 bert_model: Any = None
 bert_tokenizer: Any = None
 tts_engine: Any = None
+filler_cache: list[np.ndarray] = []
 avatar_engine: Any = None
 
 
@@ -181,7 +182,7 @@ def _load_vocal_model(model_name: str, device_pref: str = "auto") -> Any:
 async def prewarm_all() -> None:
     """Load core runtime models best-effort for lower first-turn latency."""
     global whisper_model, silero_vad, vocal_model, face_model, bert_model, bert_tokenizer
-    global tts_engine, avatar_engine
+    global tts_engine, avatar_engine, filler_cache
 
     settings = get_settings()
     loop = asyncio.get_running_loop()
@@ -223,6 +224,11 @@ async def prewarm_all() -> None:
         settings.tts_backend,
         settings.chatterbox_device,
     )
+
+    if tts_engine is not None:
+        # Optimization: Warm up the model and pre-cache filler phrases
+        await tts_engine.synthesize_warmup()
+        filler_cache = await tts_engine.synthesize_filler_cache()
 
     avatar_engine = await loop.run_in_executor(
         None,
