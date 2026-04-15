@@ -209,11 +209,10 @@ export default function LiveSessionRoom() {
   }
 
   return (
-    <main className="min-h-screen bg-black p-4 text-qace-text lg:p-6 selection:bg-[var(--accent-hover)] selection:text-white">
-      <div className="apple-gradient-bg" />
-      <header className="apple-glass mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[2rem] px-6 py-4">
+    <main className="min-h-screen bg-gradient-to-b from-[#0b1225] via-[#0d152d] to-[#091024] p-4 text-qace-text lg:p-6 selection:bg-qace-primary selection:text-white">
+      <header className="card-glow mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/5 px-6 py-4 shadow-xl shadow-black/20">
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-[var(--muted)] font-semibold mb-1">Live Interview Room</p>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-qace-muted">Live Interview Room</p>
           <h1 className="text-xl font-bold tracking-tight text-white">Frontend Developer Mock Interview</h1>
         </div>
         <div className="flex items-center gap-2 text-xs">
@@ -240,7 +239,7 @@ export default function LiveSessionRoom() {
 
       <div className="grid gap-6 lg:grid-cols-12">
         <section className="lg:col-span-8">
-          <div className="apple-glass relative overflow-hidden rounded-[2.5rem] p-4 shadow-2xl">
+          <div className="card-glow relative overflow-hidden rounded-[2.5rem] border border-white/20 bg-[#12182a] p-4 shadow-2xl shadow-black/35">
             <div className="absolute left-8 top-8 z-10 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 text-[11px] font-semibold tracking-wide backdrop-blur-md">
               <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-red-400 animate-pulse" : "bg-slate-400"}`} />
               <span>{isConnected ? "Live Recording" : "Not Connected"}</span>
@@ -274,7 +273,7 @@ export default function LiveSessionRoom() {
                 avatarState={avatarState}
                 containerClassName="w-full h-full"
               />
-              <div className="flex items-center justify-between px-4 py-2 text-[10px] text-[var(--muted)] font-semibold uppercase tracking-wider bg-black/50 absolute bottom-0 left-0 right-0 backdrop-blur-lg">
+              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between bg-black/50 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-qace-muted backdrop-blur-lg">
                 <span>AI Interviewer</span>
                 <span className={serverMicGated ? "text-blue-400 animate-pulse" : remoteAudioStream ? "text-green-400" : ""}>
                   {serverMicGated ? "Thinking..." : remoteAudioStream ? "Connected" : "Ready"}

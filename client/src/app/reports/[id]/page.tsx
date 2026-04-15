@@ -27,6 +27,7 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
 
   useEffect(() => {
     if (!session) return;
+    const activeSession = session;
     let cancelled = false;
     
     async function fetchCoaching() {
@@ -37,10 +38,10 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            transcripts: session.transcript_events || [],
-            scores: { final: session.final_score },
-            stress_level: session.stress_level || "none",
-            mode: session.mode
+            transcripts: activeSession.transcript_events || [],
+            scores: { final: activeSession.final_score },
+            stress_level: activeSession.stress_level || "none",
+            mode: activeSession.mode
           })
         });
         if (!res.ok) throw new Error("Failed to fetch coaching");
@@ -86,7 +87,7 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
               <ProgressRow key={metric.label} label={metric.label} value={metric.value} />
             ))}
           </div>
-          <div className="mt-6 border-t border-white/10 pt-4 text-xs text-[var(--muted)] opacity-80 font-medium tracking-wide">
+          <div className="mt-6 border-t border-white/10 pt-4 text-xs font-medium tracking-wide text-qace-muted/80">
             Session mode: <span className="capitalize text-white">{session?.mode ?? "unknown"}</span> • Difficulty: {session?.difficulty ?? "unknown"}
           </div>
         </GlassCard>
@@ -100,7 +101,7 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
               <div className="h-4 w-2/3 animate-pulse rounded bg-white/10" />
             </div>
           ) : coaching ? (
-            <div className="space-y-4 text-sm text-[var(--muted)]">
+            <div className="space-y-4 text-sm text-qace-muted">
                <div className="rounded-2xl border border-white/5 bg-black/40 p-4">
                  <strong className="text-white block mb-1">General Analysis:</strong> {coaching.general_tip}
                </div>
@@ -112,7 +113,7 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
                </div>}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-[var(--muted)]">Not available for this session.</div>
+            <div className="mt-3 text-sm text-qace-muted">Not available for this session.</div>
           )}
         </GlassCard>
       </section>
@@ -121,7 +122,7 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
         <section className="mt-6 grid gap-6 md:grid-cols-2">
           <GlassCard className="animate-fade-up-delayed md:col-span-2">
             <h3 className="mb-4 text-xl font-bold tracking-tight text-white">Stress Analytics ({session.stress_level})</h3>
-            <div className="grid gap-4 md:grid-cols-3 text-sm text-[var(--muted)]">
+            <div className="grid gap-4 text-sm text-qace-muted md:grid-cols-3">
                <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-5 shadow-[0_4px_20px_rgba(99,102,241,0.05)]">
                  <p className="font-semibold text-white tracking-wide">Composure Delta</p>
                  <p className="mt-2 text-indigo-200/80">Maintained relative calm despite sharp follow-ups.</p>
@@ -142,14 +143,14 @@ export default function ReportDetailPage({ params }: { params: { id: string } })
       <section className="mt-6 grid gap-6 md:grid-cols-2">
         <GlassCard className="animate-fade-up-delayed">
           <h3 className="mb-3 text-xl font-bold tracking-tight text-white">Suggested Rewrite</h3>
-          <p className="mt-2 leading-relaxed text-sm text-[var(--muted)] italic border-l-2 border-white/20 pl-4 bg-white/5 py-2 px-3 rounded-r-xl">
+          <p className="mt-2 rounded-r-xl border-l-2 border-white/20 bg-white/5 px-3 py-2 text-sm italic leading-relaxed text-qace-muted">
             "I designed a cache invalidation strategy that reduced stale reads by 41% and improved API p95 latency by 120ms. I coordinated with frontend and infra teams, then monitored rollout with feature flags and fallback controls."
           </p>
         </GlassCard>
 
         <GlassCard className="animate-fade-up-delayed-2">
           <h3 className="mb-3 text-xl font-bold tracking-tight text-white">Next Drill Plan</h3>
-          <ol className="mt-2 space-y-3 text-sm text-[var(--muted)] font-medium list-decimal list-inside bg-black/40 p-4 rounded-2xl border border-white/5">
+          <ol className="mt-2 list-inside list-decimal space-y-3 rounded-2xl border border-white/5 bg-black/40 p-4 text-sm font-medium text-qace-muted">
             <li className="pl-1">10-minute behavioral response compression practice.</li>
             <li className="pl-1">Two follow-up technical scenarios with strict 90-second answers.</li>
             <li className="pl-1">Re-run full mock interview and compare composure delta.</li>

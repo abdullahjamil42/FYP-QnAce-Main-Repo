@@ -96,27 +96,36 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden text-qace-text selection:bg-[var(--accent-hover)] selection:text-white bg-black">
-      <div className="apple-gradient-bg" />
+    <div className="app-liquid-page relative min-h-screen overflow-hidden text-qace-text">
+      <div className="app-liquid-bg" />
+      <div className="app-aurora-drift" />
+      <div className="app-floating-orbs" />
+      <div className="app-starfield" />
+      <div className="app-liquid-noise" />
+      <div className="app-vignette-breath" />
 
-      <header className="sticky top-0 z-50 w-full apple-glass border-x-0 border-t-0 bg-transparent mb-8">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-3">
-          <Link href="/" className="flex items-center gap-2 group">
-            <BrandLogo className="h-6 w-auto text-white transition-transform group-hover:scale-105" />
-            <span className="text-lg font-semibold tracking-tight text-white">
-              Q&A<span className="text-[var(--accent-base)] font-bold">ce</span>
+      <div className="shell-corner-glow-a pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-sky-500 blur-3xl" />
+      <div className="shell-corner-glow-b pointer-events-none absolute -right-20 top-32 h-72 w-72 rounded-full bg-purple-500 blur-3xl" />
+      <div className="shell-corner-glow-a pointer-events-none absolute -bottom-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-sky-400 blur-3xl" />
+
+      <header className="sticky top-0 z-20">
+        <div className="mx-auto grid w-full max-w-[92rem] grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-4 sm:px-5 md:px-8">
+          <Link href="/" className="justify-self-start flex items-center gap-2">
+            <BrandLogo className="h-8 w-auto text-white" />
+            <span className="text-xl font-semibold tracking-tight text-white">
+              Q&A<span className="text-sky-400">ce</span>
             </span>
           </Link>
 
-          <nav className="hidden md:flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-1 backdrop-blur-md">
+          <nav className="justify-self-center flex max-w-[56vw] items-center gap-1 overflow-x-auto rounded-full border border-white/20 bg-white/10 px-2 py-1 backdrop-blur-md">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-medium transition-all ${
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition ${
                   isActive(pathname, item.href)
-                    ? "bg-white/10 text-white shadow-sm"
-                    : "text-[var(--muted)] hover:bg-white/5 hover:text-white"
+                    ? "bg-white/18 text-white"
+                    : "text-qace-muted hover:bg-white/10 hover:text-white"
                 }`}
               >
                 {item.label}
@@ -125,25 +134,23 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
           </nav>
 
           {user ? (
-            <div className="relative">
+            <div className="relative justify-self-end">
               <button
                 onClick={() => setMenuOpen((open) => !open)}
-                className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 pl-2 pr-4 py-1.5 text-xs font-semibold text-white transition hover:bg-white/10"
+                className="flex items-center gap-2 rounded-full px-2 py-1.5 text-sm text-white transition hover:text-sky-200"
               >
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent-base)] text-[10px] text-white">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-qace-primary text-xs font-semibold text-white">
                   {initials}
                 </span>
-                <span className="max-w-28 truncate">{profileLabel}</span>
+                <span className="max-w-28 truncate pr-2">{profileLabel}</span>
               </button>
               {menuOpen ? (
-                <div className="absolute right-0 mt-3 w-56 rounded-2xl apple-glass p-2 shadow-2xl">
-                  <div className="px-3 py-2 border-b border-white/10 mb-2">
-                    <p className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Signed in as</p>
-                    <p className="truncate text-sm font-medium text-white">{user.email}</p>
-                  </div>
+                <div className="app-frosted absolute right-0 top-12 w-56 rounded-xl p-2">
+                  <p className="px-2 py-1 text-xs text-qace-muted">Signed in as</p>
+                  <p className="truncate px-2 pb-2 text-sm text-white">{user.email}</p>
                   <button
                     onClick={handleSignOut}
-                    className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-red-400 transition hover:bg-red-500/10"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-200 transition hover:bg-red-500/20"
                   >
                     Sign out
                   </button>
@@ -153,7 +160,7 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
           ) : (
             <Link
               href="/login"
-              className="apple-btn-secondary text-xs"
+              className="justify-self-end rounded-full px-4 py-2 text-sm font-medium text-white transition hover:text-sky-200"
             >
               Login
             </Link>
@@ -161,15 +168,15 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-7xl px-6 pb-24">
-        <section className="mb-10 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
-          <div className="space-y-1">
-            <h1 className="animate-fade-up text-3xl font-bold tracking-tight md:text-4xl">{title}</h1>
-            {subtitle ? <p className="animate-fade-up-delayed max-w-2xl text-sm text-[var(--muted)]">{subtitle}</p> : null}
+      <main className="relative z-10 mx-auto w-full max-w-[92rem] px-3 py-10 sm:px-5 md:px-8 md:py-12">
+        <section className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+          <div className="space-y-2">
+            <h1 className="animate-fade-up text-3xl font-semibold md:text-4xl">{title}</h1>
+            {subtitle ? <p className="animate-fade-up-delayed max-w-2xl text-qace-muted">{subtitle}</p> : null}
           </div>
-          {actions ? <div className="animate-fade-up-delayed-2 shrink-0">{actions}</div> : null}
+          {actions ? <div className="animate-fade-up-delayed-2">{actions}</div> : null}
         </section>
-        <div className="animate-fade-up-delayed">{children}</div>
+        {children}
       </main>
     </div>
   );

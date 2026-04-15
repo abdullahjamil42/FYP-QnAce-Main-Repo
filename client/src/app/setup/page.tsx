@@ -20,7 +20,9 @@ export default function SetupPage() {
   }, []);
 
   useEffect(() => {
+    const existing = loadSetupConfig();
     saveSetupConfig({
+      ...existing,
       mode,
       difficulty,
       durationMinutes: duration,

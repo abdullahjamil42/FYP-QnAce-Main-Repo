@@ -226,13 +226,13 @@ const InterviewerAvatar = forwardRef<InterviewerAvatarRef, InterviewerAvatarProp
             <svg className="h-16 w-16 text-indigo-400/80 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span className="text-[var(--muted)] text-[10px] uppercase tracking-wide text-center px-4 font-semibold">Avatar Display Idle<br/><span className="font-medium opacity-60">Voice Engine Connected</span></span>
+            <span className="text-qace-muted text-[10px] uppercase tracking-wide text-center px-4 font-semibold">Avatar Display Idle<br/><span className="font-medium opacity-60">Voice Engine Connected</span></span>
           </div>
         ) : !isLoaded ? (
           <div className="absolute inset-0 flex items-center justify-center bg-zinc-950 z-50">
             <div className="flex flex-col items-center gap-4">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent-base)] border-t-transparent" />
-              <span className="text-[var(--muted)] text-xs font-medium animate-pulse">Initializing 3D Pipeline...</span>
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-qace-primary border-t-transparent" />
+              <span className="text-qace-muted text-xs font-medium animate-pulse">Initializing 3D Pipeline...</span>
             </div>
           </div>
         ) : null}

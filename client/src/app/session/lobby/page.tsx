@@ -108,13 +108,13 @@ export default function SessionLobbyPage() {
           </div>
 
           <div className="card-glow mt-5 rounded-xl border border-white/10 bg-black/20 p-3 text-sm">
-            <p className="text-xs uppercase tracking-wide text-[var(--muted)]">Session Setup</p>
-            <p className="mt-2 text-[var(--muted)]">Mode: <span className="text-white capitalize font-semibold">{setup.mode}</span></p>
-            <p className="text-[var(--muted)]">Difficulty: <span className="text-white font-semibold">{setup.difficulty}</span></p>
-            <p className="text-[var(--muted)]">Duration: <span className="text-white font-semibold">{setup.durationMinutes} min</span></p>
+            <p className="text-xs uppercase tracking-wide text-qace-muted">Session Setup</p>
+            <p className="mt-2 text-qace-muted">Mode: <span className="text-white capitalize font-semibold">{setup.mode}</span></p>
+            <p className="text-qace-muted">Difficulty: <span className="text-white font-semibold">{setup.difficulty}</span></p>
+            <p className="text-qace-muted">Duration: <span className="text-white font-semibold">{setup.durationMinutes} min</span></p>
 
             <div className="mt-5 border-t border-white/10 pt-4">
-              <label className="mb-2 block text-xs font-semibold text-[var(--muted)]">Stress Simulation Level</label>
+              <label className="mb-2 block text-xs font-semibold text-qace-muted">Stress Simulation Level</label>
               <div className="grid grid-cols-2 gap-2">
                 {["none", "mild", "high", "brutal"].map((level) => (
                   <button
@@ -122,7 +122,7 @@ export default function SessionLobbyPage() {
                     onClick={() => updateSetup("stressLevel", level)}
                     className={`rounded-xl p-2.5 text-left text-xs transition-all duration-300 ${
                       (setup.stressLevel || "none") === level
-                        ? "bg-[#06c]/20 border-[#06c] border shadow-[0_0_12px_rgba(0,102,204,0.3)] text-white"
+                        ? "border border-qace-primary bg-qace-primary/20 text-white shadow-[0_0_12px_rgba(56,189,248,0.35)]"
                         : "bg-black/40 border-transparent border text-slate-400 hover:bg-black/60"
                     }`}
                   >
@@ -145,8 +145,8 @@ export default function SessionLobbyPage() {
             </div>
 
             <div className="mt-5 border-t border-white/10 pt-4">
-              <label className="mb-2 block text-xs font-semibold text-[var(--muted)]">Context & Experience</label>
-              <div className={`relative rounded-xl border border-dashed transition-all duration-300 p-4 text-center ${cvUploading ? 'border-[#06c] bg-[#06c]/5' : cvParsedInfo ? 'border-green-500/30 bg-green-500/5' : 'border-white/20 bg-black/20 hover:bg-black/40 hover:border-white/40'}`}>
+              <label className="mb-2 block text-xs font-semibold text-qace-muted">Context & Experience</label>
+              <div className={`relative rounded-xl border border-dashed transition-all duration-300 p-4 text-center ${cvUploading ? 'border-qace-primary bg-qace-primary/10' : cvParsedInfo ? 'border-green-500/30 bg-green-500/5' : 'border-white/20 bg-black/20 hover:bg-black/40 hover:border-white/40'}`}>
                 <input
                   type="file"
                   accept=".pdf,.docx,.txt"
@@ -163,8 +163,8 @@ export default function SessionLobbyPage() {
                 )}
                 {cvUploading && (
                   <div className="flex flex-col items-center gap-2">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#06c] border-t-transparent" />
-                    <p className="text-xs text-[#06c]">Extracting Skills...</p>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-qace-primary border-t-transparent" />
+                    <p className="text-xs text-qace-primary">Extracting Skills...</p>
                   </div>
                 )}
                 {cvParsedInfo && !cvUploading && (
