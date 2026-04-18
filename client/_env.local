@@ -1,0 +1,8 @@
+NEXT_PUBLIC_SUPABASE_URL=https://hgcjkdeqzayvhgaustuv.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhnY2prZGVxemF5dmhnYXVzdHV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1OTM2NTcsImV4cCI6MjA4OTE2OTY1N30.ExB-6Xb8RuMaKiR9c-frWY-J3wLDXTtSBN2Ok83qwJk
+NEXT_PUBLIC_QACE_API_URL=http://localhost:8000
+
+# Server-side / scripts only (not exposed to browser). From Supabase → Settings → API / Database.
+# SUPABASE_URL=https://hgcjkdeqzayvhgaustuv.supabase.co
+# SUPABASE_SERVICE_ROLE_KEY=
+# DATABASE_URL=postgresql://postgres.[ref]:[YOUR-DB-PASSWORD]@aws-0-[region].pooler.supabase.com:6543/postgres

@@ -1,0 +1,50 @@
+{
+  "problems": [
+    {
+      "external_slug": "hello-stdout",
+      "title": "Print Hello",
+      "difficulty": "easy",
+      "topics": ["implementation"],
+      "description": "Read a line from stdin and print `Hello, <name>` where <name> is the trimmed input.",
+      "examples": [
+        {
+          "input": "World",
+          "output": "Hello, World"
+        }
+      ],
+      "constraints": "Input is a single line with length at most 100.",
+      "hints": [
+        "Use input() or sys.stdin to read.",
+        "Strip whitespace from the line before using it.",
+        "Print exactly in the form: Hello, <name>"
+      ],
+      "complexity_benchmark_stdin": {
+        "n100": "x\n",
+        "n1000": "x\n",
+        "n10000": "x\n"
+      },
+      "test_cases": [
+        {
+          "stdin": "World\n",
+          "expected_output": "Hello, World",
+          "is_hidden": false
+        },
+        {
+          "stdin": "Alice\n",
+          "expected_output": "Hello, Alice",
+          "is_hidden": false
+        },
+        {
+          "stdin": "  Bob  \n",
+          "expected_output": "Hello, Bob",
+          "is_hidden": true
+        },
+        {
+          "stdin": "Test\n",
+          "expected_output": "Hello, Test",
+          "is_hidden": true
+        }
+      ]
+    }
+  ]
+}

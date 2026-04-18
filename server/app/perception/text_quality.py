@@ -14,6 +14,7 @@ Architecture:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -79,46 +80,72 @@ def _simple_tokenize(text: str, max_length: int = 128) -> tuple[np.ndarray, np.n
 def _heuristic_quality(text: str) -> TextQualityResult:
     """
     Rule-based fallback when BERT model is unavailable.
-    Uses text length, structure, and keyword presence as proxies.
+    Scores on: length, STAR structure, specificity, connectives, filler penalty.
     """
+    lower = text.lower()
     words = text.split()
     word_count = len(words)
-    
-    # Basic quality signals
-    has_structure = any(kw in text.lower() for kw in [
-        "first", "then", "because", "therefore", "for example",
-        "in my experience", "specifically", "as a result",
-        "situation", "task", "action", "result",  # STAR method
-    ])
-    has_detail = word_count > 30
-    has_specifics = any(char.isdigit() for char in text)  # contains numbers
-    sentence_count = text.count(".") + text.count("!") + text.count("?")
-    
-    # Score components
-    length_score = min(word_count / 50.0, 1.0)  # up to 50 words = full credit
-    structure_score = 0.3 if has_structure else 0.0
-    detail_score = 0.2 if has_detail else 0.0
-    specifics_score = 0.1 if has_specifics else 0.0
-    sentence_score = min(sentence_count / 3.0, 0.2)  # up to 3 sentences
-    
-    raw_score = length_score * 0.4 + structure_score + detail_score + specifics_score + sentence_score
+
+    # --- Length score (sweet spot: 40-120 words) ---
+    if word_count < 10:
+        length_score = word_count / 10.0 * 0.3
+    elif word_count <= 120:
+        length_score = 0.3 + (word_count - 10) / 110.0 * 0.4
+    else:
+        length_score = 0.7  # very long answers get no extra credit
+
+    # --- STAR method detection (Situation, Task, Action, Result) ---
+    star_keywords = {
+        "situation": ["situation", "context", "at the time", "when i was", "we were facing"],
+        "task": ["task", "my responsibility", "i was responsible", "i needed to", "the goal was"],
+        "action": ["action", "i decided", "i implemented", "i built", "i led", "i fixed",
+                   "i refactored", "i designed", "i wrote", "i deployed", "so i"],
+        "result": ["result", "outcome", "as a result", "this led to", "we achieved",
+                   "reduced", "improved", "increased", "saved", "the impact was"],
+    }
+    star_hit = sum(
+        1 for kws in star_keywords.values()
+        if any(kw in lower for kw in kws)
+    )
+    star_score = star_hit / 4.0 * 0.25  # max 0.25
+
+    # --- Specificity: numbers, names, tech terms ---
+    has_numbers = any(c.isdigit() for c in text)
+    tech_terms = ["api", "database", "cache", "latency", "throughput", "sql", "docker",
+                  "kubernetes", "microservice", "algorithm", "complexity", "async", "thread",
+                  "deploy", "ci/cd", "test", "sprint", "stakeholder", "metric", "sla"]
+    tech_hits = sum(1 for t in tech_terms if t in lower)
+    specificity_score = min((has_numbers * 0.05) + (tech_hits * 0.02), 0.15)
+
+    # --- Logical connectives ---
+    connectives = ["because", "therefore", "however", "although", "which meant",
+                   "as a result", "consequently", "in order to", "this allowed",
+                   "specifically", "for example", "for instance", "in particular"]
+    connective_hits = sum(1 for c in connectives if c in lower)
+    connective_score = min(connective_hits * 0.04, 0.12)
+
+    # --- Filler penalty ---
+    fillers = ["um", "uh", "like", "you know", "basically", "literally",
+               "kind of", "sort of", "i mean", "actually"]
+    filler_hits = sum(lower.count(f) for f in fillers)
+    filler_penalty = min(filler_hits * 0.03, 0.12)
+
+    # --- Final score ---
+    raw_score = length_score + star_score + specificity_score + connective_score - filler_penalty
     raw_score = max(0.0, min(1.0, raw_score))
-    
-    # Map to quality categories
-    if raw_score >= 0.65:
-        probs = {"poor": 0.05, "average": 0.25, "excellent": 0.70}
+
+    if raw_score >= 0.62:
+        probs = {"poor": 0.05, "average": 0.20, "excellent": 0.75}
         label = "excellent"
-    elif raw_score >= 0.35:
+    elif raw_score >= 0.32:
         probs = {"poor": 0.15, "average": 0.65, "excellent": 0.20}
         label = "average"
     else:
-        probs = {"poor": 0.65, "average": 0.30, "excellent": 0.05}
+        probs = {"poor": 0.70, "average": 0.25, "excellent": 0.05}
         label = "poor"
-    
-    base_score = sum(
-        QUALITY_BASE_SCORES[k] * v for k, v in probs.items()
-    )
-    
+
+    base_score = sum(QUALITY_BASE_SCORES[k] * v for k, v in probs.items())
+
     return TextQualityResult(
         label=label,
         probabilities=probs,
@@ -222,3 +249,148 @@ def classify_quality(text: str, bert_model: Any, tokenizer: Any = None) -> TextQ
     )
 
     return result
+
+
+# ────────────────────────────────────────
+# LLM-based text quality evaluation
+# ────────────────────────────────────────
+
+_LLM_EVAL_SYSTEM_PROMPT = """\
+You are an interview answer quality evaluator. Given a candidate's spoken answer, \
+rate it on a 0-100 scale and classify it as "poor", "average", or "excellent".
+
+Scoring guide:
+- poor (0-40): Off-topic, vague, no structure, very short, or incoherent.
+- average (41-70): Addresses the question but lacks depth, specifics, or STAR structure.
+- excellent (71-100): Clear, specific, well-structured (STAR), with measurable outcomes.
+
+Respond with ONLY a JSON object, no other text:
+{"score": <int 0-100>, "label": "<poor|average|excellent>"}"""
+
+
+async def classify_quality_llm(text: str, settings: Any) -> TextQualityResult:
+    """
+    Evaluate interview answer quality using the configured LLM provider.
+
+    Falls back to heuristic scoring on failure or timeout.
+    """
+    if not text or not text.strip():
+        return TextQualityResult(
+            label="poor",
+            probabilities={"poor": 1.0, "average": 0.0, "excellent": 0.0},
+            confidence=1.0,
+            base_score=30.0,
+        )
+
+    t0 = time.perf_counter()
+
+    try:
+        import httpx
+
+        base_url = getattr(settings, "local_llm_base_url", "http://localhost:8081")
+        url = f"{base_url.rstrip('/')}/v1/chat/completions"
+
+        api_key = getattr(settings, "local_llm_api_key", "") or ""
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        payload = {
+            "model": getattr(settings, "local_llm_base_model", ""),
+            "messages": [
+                {"role": "system", "content": _LLM_EVAL_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Candidate's answer:\n\n{text}"},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 60,
+            "stream": False,
+        }
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+            response = await client.post(url, headers=headers, json=payload)
+
+        if response.status_code != 200:
+            logger.warning("LLM quality eval HTTP %d, falling back to heuristic", response.status_code)
+            return _heuristic_quality(text)
+
+        body = response.json()
+        content = ""
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            logger.warning("LLM quality eval: malformed response, falling back to heuristic")
+            return _heuristic_quality(text)
+
+        # Parse JSON from the LLM response
+        parsed = _parse_llm_eval_json(content)
+        if parsed is None:
+            logger.warning("LLM quality eval: failed to parse '%s', falling back to heuristic", content[:100])
+            return _heuristic_quality(text)
+
+        score = max(0.0, min(100.0, float(parsed["score"])))
+        label = str(parsed["label"]).lower()
+        if label not in QUALITY_LABELS:
+            if score >= 71:
+                label = "excellent"
+            elif score >= 41:
+                label = "average"
+            else:
+                label = "poor"
+
+        # Build probability distribution from score
+        if label == "excellent":
+            probs = {"poor": 0.05, "average": 0.15, "excellent": 0.80}
+        elif label == "average":
+            probs = {"poor": 0.15, "average": 0.70, "excellent": 0.15}
+        else:
+            probs = {"poor": 0.75, "average": 0.20, "excellent": 0.05}
+
+        inference_ms = (time.perf_counter() - t0) * 1000.0
+
+        result = TextQualityResult(
+            label=label,
+            probabilities=probs,
+            confidence=probs[label],
+            base_score=round(score, 1),
+            inference_ms=round(inference_ms, 1),
+        )
+
+        logger.info(
+            "TextQuality(LLM): %s (score=%.1f, %.1fms)",
+            label, score, inference_ms,
+        )
+        return result
+
+    except Exception as exc:
+        inference_ms = (time.perf_counter() - t0) * 1000.0
+        logger.warning("LLM quality eval failed (%.0fms): %s, falling back to heuristic", inference_ms, exc)
+        result = _heuristic_quality(text)
+        result.inference_ms = round(inference_ms, 1)
+        return result
+
+
+def _parse_llm_eval_json(text: str) -> Optional[dict]:
+    """Extract {score, label} JSON from LLM response text."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict) and "score" in obj and "label" in obj:
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting JSON from surrounding text
+    first = raw.find("{")
+    last = raw.rfind("}")
+    if first >= 0 and last > first:
+        try:
+            obj = json.loads(raw[first:last + 1])
+            if isinstance(obj, dict) and "score" in obj and "label" in obj:
+                return obj
+        except json.JSONDecodeError:
+            pass
+
+    return None

@@ -1,0 +1,11 @@
+{
+  "architectures": [
+    "FacialEmotionModel"
+  ],
+  "dropout": 0.4,
+  "dtype": "float32",
+  "image_size": 260,
+  "model_type": "facial_emotion_efficientnet",
+  "num_classes": 7,
+  "transformers_version": "4.57.3"
+}

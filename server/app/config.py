@@ -9,8 +9,8 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # server/app/config.py → repo root
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # ── Models ──
     model_dir: str = Field(str(_REPO_ROOT / "models"), alias="QACE_MODEL_DIR")
-    whisper_model: str = Field("tiny.en", alias="QACE_WHISPER_MODEL")
+    whisper_model: str = Field("small.en", alias="QACE_WHISPER_MODEL")
     silero_onnx: str = Field(
         str(_REPO_ROOT / "models" / "silero-vad" / "silero_vad.onnx"),
         alias="QACE_SILERO_ONNX",
@@ -60,6 +60,10 @@ class Settings(BaseSettings):
         "bert-base-uncased",
         alias="QACE_BERT_TOKENIZER",
     )
+    text_quality_backend: str = Field(
+        "llm",
+        alias="QACE_TEXT_QUALITY_BACKEND",
+    )  # "llm", "bert", or "heuristic"
 
     # ── Phase 3: Intelligence / RAG ──
     chroma_dir: str = Field(
@@ -71,18 +75,25 @@ class Settings(BaseSettings):
     groq_model: str = Field("llama-3.3-70b-versatile", alias="QACE_GROQ_MODEL")
     airforce_model: str = Field("gpt-4o-mini", alias="QACE_AIRFORCE_MODEL")
     local_llm_path: str = Field(
-        str(_REPO_ROOT / "Llama_3.1_fine_Tuned"),
+        str(_REPO_ROOT.parent),
         alias="QACE_LOCAL_LLM_PATH",
     )
-    local_llm_base_model: str = Field("", alias="QACE_LOCAL_LLM_BASE_MODEL")
+    local_llm_base_model: str = Field(
+        "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+        alias="QACE_LOCAL_LLM_BASE_MODEL",
+    )
     local_llm_adapter_path: str = Field(
-        str(_REPO_ROOT / "Llama_3.1_fine_Tuned" / "qace-llm-package" / "adapters" / "evaluator"),
+        str(_REPO_ROOT.parent / "adapters" / "evaluator"),
         alias="QACE_LOCAL_LLM_ADAPTER_PATH",
     )
-    local_llm_base_url: str = Field("", alias="QACE_LOCAL_LLM_BASE_URL")
+    local_llm_base_url: str = Field("http://localhost:8081", alias="QACE_LOCAL_LLM_BASE_URL")
     local_llm_api_key: str = Field("", alias="QACE_LOCAL_LLM_API_KEY")
     local_llm_device: str = Field("auto", alias="QACE_LOCAL_LLM_DEVICE")
     local_llm_dtype: str = Field("auto", alias="QACE_LOCAL_LLM_DTYPE")
+    local_llm_server_script: str = Field(
+        str(_REPO_ROOT.parent / "qace_local_llm_server.py"),
+        alias="QACE_LOCAL_LLM_SERVER_SCRIPT",
+    )
     interviewer_classifier_model: str = Field(
         "llama-3.1-8b-instant",
         alias="QACE_INTERVIEWER_CLASSIFIER_MODEL",
@@ -108,6 +119,7 @@ class Settings(BaseSettings):
 
     # ── Phase 4: Synthesis ──
     tts_voice: str = Field("en-US-GuyNeural", alias="QACE_TTS_VOICE")
+    tts_voice_female: str = Field("en-US-JennyNeural", alias="QACE_TTS_VOICE_FEMALE")
     tts_backend: str = Field("auto", alias="QACE_TTS_BACKEND")
     chatterbox_device: str = Field("auto", alias="QACE_CHATTERBOX_DEVICE")
     tts_sentence_streaming: bool = Field(True, alias="QACE_TTS_SENTENCE_STREAMING")
@@ -132,7 +144,29 @@ class Settings(BaseSettings):
         alias="QACE_SEMANTIC_MODEL",
     )
 
-    model_config = {"env_file": str(_REPO_ROOT / ".env"), "extra": "ignore"}
+    # ── Auth (Supabase JWT) ──
+    supabase_jwt_secret: str = Field("", alias="SUPABASE_JWT_SECRET")
+    require_auth: bool = Field(False, alias="QACE_REQUIRE_AUTH")
+
+    # ── Judge0 (code execution) ──
+    judge0_api_url: str = Field("http://localhost:2358", alias="JUDGE0_API_URL")
+
+    # ── Supabase REST (server-side session PATCH for coding round) ──
+    supabase_url: str = Field(
+        "",
+        validation_alias=AliasChoices("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"),
+    )
+    supabase_service_role_key: str = Field("", alias="SUPABASE_SERVICE_ROLE_KEY")
+
+    model_config = SettingsConfigDict(
+        env_file=(
+            _REPO_ROOT / ".env",
+            _REPO_ROOT / "client" / ".env.local",
+            _REPO_ROOT / "client" / "_env.local",
+        ),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # ── Derived helpers ──
     @property

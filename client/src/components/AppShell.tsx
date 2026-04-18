@@ -148,6 +148,13 @@ export default function AppShell({ title, subtitle, children, actions }: AppShel
                 <div className="app-frosted absolute right-0 top-12 w-56 rounded-xl p-2">
                   <p className="px-2 py-1 text-xs text-qace-muted">Signed in as</p>
                   <p className="truncate px-2 pb-2 text-sm text-white">{user.email}</p>
+                  <Link
+                    href="/settings"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white transition hover:bg-white/10"
+                  >
+                    Profile & Settings
+                  </Link>
                   <button
                     onClick={handleSignOut}
                     className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-200 transition hover:bg-red-500/20"

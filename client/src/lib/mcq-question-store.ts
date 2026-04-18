@@ -97,10 +97,22 @@ export async function fetchQuizQuestions(params: {
     const rowsByTopic = await Promise.all(
       topicIds.map(async (topicId) => {
         const table = client.from("mcq_questions" as any) as any;
+
+        // Get total count for this topic so we can pick a random offset
+        let countQuery = (client.from("mcq_questions" as any) as any)
+          .select("id", { count: "exact", head: true })
+          .eq("topic_id", topicId);
+        if (params.difficulty !== "random") {
+          countQuery = countQuery.eq("difficulty", params.difficulty);
+        }
+        const { count: totalCount } = await countQuery;
+        const maxOffset = Math.max(0, (totalCount ?? 0) - perTopicPoolLimit);
+        const randomOffset = Math.floor(Math.random() * (maxOffset + 1));
+
         let query = table
           .select("id,topic_id,subtopic_title,difficulty,question,options,answer,explanation")
           .eq("topic_id", topicId)
-          .limit(perTopicPoolLimit);
+          .range(randomOffset, randomOffset + perTopicPoolLimit - 1);
 
         if (params.difficulty !== "random") {
           query = query.eq("difficulty", params.difficulty);
@@ -138,10 +150,26 @@ export async function fetchQuizQuestions(params: {
   }
 
   const table = client.from("mcq_questions" as any) as any;
+  const pool = Math.max(params.count * 4, 40);
+
+  // Get total count so we can pick a random offset into the result set
+  let countQuery = (client.from("mcq_questions" as any) as any)
+    .select("id", { count: "exact", head: true })
+    .eq("topic_id", params.topicId);
+  if (params.difficulty !== "random") {
+    countQuery = countQuery.eq("difficulty", params.difficulty);
+  }
+  if (params.subtopic !== "All Topics") {
+    countQuery = countQuery.eq("subtopic_title", params.subtopic);
+  }
+  const { count: totalCount } = await countQuery;
+  const maxOffset = Math.max(0, (totalCount ?? 0) - pool);
+  const randomOffset = Math.floor(Math.random() * (maxOffset + 1));
+
   let query = table
     .select("id,topic_id,subtopic_title,difficulty,question,options,answer,explanation")
     .eq("topic_id", params.topicId)
-    .limit(Math.max(params.count * 4, 40));
+    .range(randomOffset, randomOffset + pool - 1);
 
   if (params.difficulty !== "random") {
     query = query.eq("difficulty", params.difficulty);

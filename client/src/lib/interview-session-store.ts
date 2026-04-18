@@ -1,4 +1,4 @@
-import type { PerceptionEvent, ScoresEvent, TranscriptEvent } from "@/hooks/useDataChannel";
+import type { PerceptionEvent, PerQuestionScore, ScoresEvent, TranscriptEvent } from "@/hooks/useDataChannel";
 import { getSupabaseClient } from "@/lib/supabase";
 
 const LOCAL_KEY = "qace_sessions_v1";
@@ -9,6 +9,9 @@ export type SetupConfig = {
   mode: string;
   difficulty: string;
   durationMinutes: number;
+  jobRole: string;
+  interviewType: "quick" | "extensive";
+  roundType: "verbal" | "coding";
 };
 
 export type SessionRecord = {
@@ -27,6 +30,9 @@ export type SessionRecord = {
   transcript_events: TranscriptEvent[];
   latest_perception: PerceptionEvent | null;
   webrtc_session_id: string | null;
+  per_question_scores: PerQuestionScore[];
+  /** Populated by POST /api/interview/submit when Supabase row exists */
+  coding_round?: unknown;
   created_at: string;
 };
 
@@ -41,6 +47,8 @@ export type SessionDraft = {
   transcripts: TranscriptEvent[];
   perception: PerceptionEvent | null;
   webrtcSessionId?: string | null;
+  perQuestionScores?: PerQuestionScore[];
+  avgTotalScore?: number;
 };
 
 function getLocalSessions(): SessionRecord[] {
@@ -77,13 +85,15 @@ function computeSessionRecord(draft: SessionDraft, userId: string | null): Sessi
     status: draft.status,
     started_at: draft.startedAt,
     ended_at: draft.endedAt,
-    final_score: draft.scores?.final ?? 0,
-    content_score: draft.scores?.content ?? 0,
-    delivery_score: draft.scores?.delivery ?? 0,
-    composure_score: draft.scores?.composure ?? 0,
+    // Prefer the per-question average total over the running utterance average.
+    final_score: draft.avgTotalScore ?? draft.scores?.avg_final ?? draft.scores?.final ?? 0,
+    content_score: draft.scores?.avg_content ?? draft.scores?.content ?? 0,
+    delivery_score: draft.scores?.avg_delivery ?? draft.scores?.delivery ?? 0,
+    composure_score: draft.scores?.avg_composure ?? draft.scores?.composure ?? 0,
     transcript_events: draft.transcripts,
     latest_perception: draft.perception,
     webrtc_session_id: draft.webrtcSessionId ?? null,
+    per_question_scores: draft.perQuestionScores ?? [],
     created_at: now,
   };
 }
@@ -105,36 +115,36 @@ export function saveSetupConfig(config: SetupConfig) {
 }
 
 export function loadSetupConfig(): SetupConfig {
+  const defaults: SetupConfig = {
+    mode: "technical",
+    difficulty: "standard",
+    durationMinutes: 10,
+    jobRole: "software_engineer",
+    interviewType: "quick",
+    roundType: "verbal",
+  };
+
   if (typeof window === "undefined") {
-    return {
-      mode: "technical",
-      difficulty: "standard",
-      durationMinutes: 20,
-    };
+    return defaults;
   }
 
   const raw = window.localStorage.getItem(LOCAL_SETUP_KEY);
   if (!raw) {
-    return {
-      mode: "technical",
-      difficulty: "standard",
-      durationMinutes: 20,
-    };
+    return defaults;
   }
 
   try {
     const parsed = JSON.parse(raw) as SetupConfig;
     return {
-      mode: parsed.mode || "technical",
-      difficulty: parsed.difficulty || "standard",
-      durationMinutes: Number(parsed.durationMinutes) || 20,
+      mode: parsed.mode || defaults.mode,
+      difficulty: parsed.difficulty || defaults.difficulty,
+      durationMinutes: Number(parsed.durationMinutes) || defaults.durationMinutes,
+      jobRole: parsed.jobRole || defaults.jobRole,
+      interviewType: parsed.interviewType === "extensive" ? "extensive" : "quick",
+      roundType: parsed.roundType === "coding" ? "coding" : "verbal",
     };
   } catch {
-    return {
-      mode: "technical",
-      difficulty: "standard",
-      durationMinutes: 20,
-    };
+    return defaults;
   }
 }
 

@@ -20,18 +20,17 @@ import numpy as np
 
 logger = logging.getLogger("qace.vocal")
 
-# Emotion labels from wav2vec2-large-robust-12-ft-emotion-msp-dim model
-EMOTION_LABELS = ["angry", "disgusted", "fearful", "happy", "neutral", "sad", "surprised"]
+# Emotion labels from QnAce-Voice-Model (6 classes — matches training output)
+EMOTION_LABELS = ["anger", "fear", "happy", "neutral", "sad", "surprise"]
 
 # Simplified labels for interview context
 INTERVIEW_EMOTIONS = {
-    "angry": "tense",
-    "disgusted": "uncomfortable",
-    "fearful": "nervous",
+    "anger": "tense",
+    "fear": "nervous",
     "happy": "confident",
     "neutral": "composed",
     "sad": "uncertain",
-    "surprised": "engaged",
+    "surprise": "engaged",
 }
 
 
@@ -96,6 +95,72 @@ def compute_energy_features(audio_f32: np.ndarray) -> tuple[float, float]:
     rms = float(np.sqrt(np.mean(audio_f32 ** 2)))
     db = float(20 * np.log10(max(rms, 1e-10)))
     return rms, db
+
+
+def analyze_finality(audio: np.ndarray, sample_rate: int = 16_000) -> tuple[float, float]:
+    """
+    Analyse the tail of an audio segment for prosodic cues of utterance completion.
+
+    Returns ``(pitch_slope, energy_drop)``:
+
+    * **pitch_slope** — negative → falling intonation (statement ending).
+      Computed via linear regression on the pitch contour of the last 1.5s.
+    * **energy_drop** — ratio of RMS(tail 0.5s) / RMS(body 1.0s).
+      Values < 0.6 indicate the speaker is trailing off.
+    """
+    # Convert to float32 if needed
+    if audio.dtype != np.float32:
+        audio_f32 = audio.astype(np.float32) / 32768.0
+    else:
+        audio_f32 = audio
+
+    # Take the last 1.5s
+    tail_samples = int(1.5 * sample_rate)
+    segment = audio_f32[-tail_samples:] if len(audio_f32) > tail_samples else audio_f32
+
+    # ── Pitch slope ──────────────────────────────────────────────────────
+    frame_len = int(0.03 * sample_rate)  # 30ms
+    hop = int(0.01 * sample_rate)        # 10ms
+    min_lag = int(sample_rate / 500)     # 500 Hz max
+    max_lag = int(sample_rate / 60)      # 60 Hz min
+
+    pitches: list[float] = []
+    for start in range(0, len(segment) - frame_len, hop):
+        frame = segment[start: start + frame_len]
+        if np.max(np.abs(frame)) < 0.01:
+            continue
+        corr = np.correlate(frame, frame, mode="full")
+        corr = corr[len(corr) // 2:]
+        if max_lag >= len(corr):
+            continue
+        search = corr[min_lag:max_lag]
+        if len(search) == 0:
+            continue
+        peak_idx = int(np.argmax(search)) + min_lag
+        if corr[peak_idx] > 0.3 * corr[0]:
+            hz = sample_rate / peak_idx
+            if 60 <= hz <= 500:
+                pitches.append(hz)
+
+    if len(pitches) >= 3:
+        x = np.arange(len(pitches), dtype=np.float64)
+        coeffs = np.polyfit(x, pitches, 1)
+        pitch_slope = float(coeffs[0])
+    else:
+        pitch_slope = 0.0  # neutral — not enough data
+
+    # ── Energy drop ──────────────────────────────────────────────────────
+    tail_dur = int(0.5 * sample_rate)
+    if len(segment) >= tail_dur + int(0.1 * sample_rate):
+        tail_part = segment[-tail_dur:]
+        body_part = segment[:-tail_dur]
+        rms_tail = float(np.sqrt(np.mean(tail_part ** 2)))
+        rms_body = float(np.sqrt(np.mean(body_part ** 2)))
+        energy_drop = rms_tail / max(rms_body, 1e-10)
+    else:
+        energy_drop = 1.0  # neutral — not enough data
+
+    return pitch_slope, energy_drop
 
 
 def analyze(audio: np.ndarray, vocal_model: Any) -> VocalResult:

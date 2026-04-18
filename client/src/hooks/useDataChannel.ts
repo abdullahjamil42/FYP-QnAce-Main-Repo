@@ -10,6 +10,9 @@
  *  - scores: { content, delivery, composure, final }
  *  - perception: { vocal_emotion, face_emotion, text_quality_label, ... }
  *  - status: { message }
+ *  - phase: { phase, duration_s }
+ *  - question: { text, index, total, question_type, voice }
+ *  - interview_end: { total_questions, answered, skipped }
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -47,11 +50,59 @@ export interface StatusEvent {
   message: string;
 }
 
+export interface PhaseEvent {
+  phase:
+    | "idle"
+    | "intro"
+    | "speaking"
+    | "thinking"
+    | "answering"
+    | "transition"
+    | "complete"
+    | "coding";
+  duration_s: number;
+}
+
+export interface QuestionEvent {
+  text: string;
+  index: number;
+  total: number;
+  question_type: string;
+  voice: "male" | "female";
+}
+
+export interface PerQuestionScore {
+  index: number;
+  question: string;
+  score: number;
+  content: number;
+  delivery: number;
+  composure: number;
+  skipped: boolean;
+}
+
+export interface InterviewEndEvent {
+  total_questions: number;
+  answered: number;
+  skipped: number;
+  per_question_scores: PerQuestionScore[];
+  avg_total_score: number;
+}
+
+export interface InterviewerFeedbackEvent {
+  text: string;
+  mode: string;
+}
+
 export type ChannelEvent =
   | ({ type: "transcript" } & TranscriptEvent)
   | ({ type: "scores" } & ScoresEvent)
   | ({ type: "perception" } & PerceptionEvent)
-  | ({ type: "status" } & StatusEvent);
+  | ({ type: "status" } & StatusEvent)
+  | ({ type: "phase" } & PhaseEvent)
+  | ({ type: "question" } & QuestionEvent)
+  | ({ type: "interviewer_feedback" } & InterviewerFeedbackEvent)
+  | ({ type: "interview_end" } & InterviewEndEvent);
 
 export function useDataChannel(
   dataChannel: RTCDataChannel | null,
@@ -63,8 +114,11 @@ export function useDataChannel(
   const [scores, setScores] = useState<ScoresEvent | null>(null);
   const [perception, setPerception] = useState<PerceptionEvent | null>(null);
   const [statusLog, setStatusLog] = useState<string[]>([]);
+  const [currentPhase, setCurrentPhase] = useState<PhaseEvent | null>(null);
+  const [currentQuestion, setCurrentQuestion] = useState<QuestionEvent | null>(null);
+  const [questionHistory, setQuestionHistory] = useState<QuestionEvent[]>([]);
+  const [interviewEnd, setInterviewEnd] = useState<InterviewEndEvent | null>(null);
 
-  // Handle JSON events from server
   useEffect(() => {
     if (!dataChannel) return;
 
@@ -110,9 +164,51 @@ export function useDataChannel(
             break;
           case "status":
             setStatusLog((prev) => [
-              ...prev.slice(-19), // keep last 20
+              ...prev.slice(-19),
               `[${new Date().toLocaleTimeString()}] ${parsed.message}`,
             ]);
+            break;
+          case "phase":
+            setCurrentPhase({
+              phase: parsed.phase,
+              duration_s: parsed.duration_s,
+            });
+            break;
+          case "question": {
+            const q: QuestionEvent = {
+              text: parsed.text,
+              index: parsed.index,
+              total: parsed.total,
+              question_type: parsed.question_type,
+              voice: parsed.voice,
+            };
+            setCurrentQuestion(q);
+            if (parsed.index >= 0) {
+              setQuestionHistory((prev) => [...prev, q]);
+            }
+            break;
+          }
+          case "interviewer_feedback": {
+            // Follow-up probe from the interviewer — update the displayed
+            // question so the UI reflects what the user is now being asked,
+            // and keep it out of questionHistory (it's a probe, not a new Q).
+            setCurrentQuestion((prev) => ({
+              text: parsed.text,
+              index: prev?.index ?? -3,
+              total: prev?.total ?? 0,
+              question_type: `follow_up:${parsed.mode}`,
+              voice: prev?.voice ?? "male",
+            }));
+            break;
+          }
+          case "interview_end":
+            setInterviewEnd({
+              total_questions: parsed.total_questions,
+              answered: parsed.answered,
+              skipped: parsed.skipped,
+              per_question_scores: (parsed as any).per_question_scores ?? [],
+              avg_total_score: (parsed as any).avg_total_score ?? 0,
+            });
             break;
         }
       } catch {
@@ -124,7 +220,6 @@ export function useDataChannel(
     return () => dataChannel.removeEventListener("message", handler);
   }, [dataChannel]);
 
-  // Send AU telemetry (binary) — called by VideoCanvas at ~10Hz
   const sendAUTelemetry = useCallback(
     (buffer: ArrayBuffer) => {
       if (auChannel && auChannel.readyState === "open") {
@@ -138,6 +233,37 @@ export function useDataChannel(
     [auChannel]
   );
 
+  const sendCommand = useCallback(
+    (command: string) => {
+      if (dataChannel && dataChannel.readyState === "open") {
+        try {
+          dataChannel.send(JSON.stringify({ type: command }));
+        } catch {
+          // Non-critical
+        }
+      }
+    },
+    [dataChannel]
+  );
+
+  const sendCodingDebrief = useCallback(
+    (scoring: Record<string, unknown>) => {
+      if (dataChannel && dataChannel.readyState === "open") {
+        try {
+          dataChannel.send(
+            JSON.stringify({
+              type: "coding_debrief_request",
+              scoring_json: scoring,
+            })
+          );
+        } catch {
+          // Non-critical
+        }
+      }
+    },
+    [dataChannel]
+  );
+
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
     setLatestTranscript(null);
@@ -149,6 +275,12 @@ export function useDataChannel(
     scores,
     perception,
     statusLog,
+    currentPhase,
+    currentQuestion,
+    questionHistory,
+    interviewEnd,
+    sendCommand,
+    sendCodingDebrief,
     clearTranscripts,
     sendAUTelemetry,
   };

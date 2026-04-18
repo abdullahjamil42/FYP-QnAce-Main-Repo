@@ -68,6 +68,59 @@ def send_status(channel: Any, status: str) -> None:
     send_event(channel, "status", {"message": status})
 
 
+def send_phase(channel: Any, phase: str, duration_s: float = 0.0) -> None:
+    """Send an interview phase event (thinking / answering / transition)."""
+    send_event(channel, "phase", {"phase": phase, "duration_s": duration_s})
+
+
+def send_question(
+    channel: Any,
+    text: str,
+    index: int,
+    total: int,
+    question_type: str = "role_specific",
+    voice: str = "male",
+) -> None:
+    """Send the current interview question to the client."""
+    send_event(channel, "question", {
+        "text": text,
+        "index": index,
+        "total": total,
+        "question_type": question_type,
+        "voice": voice,
+    })
+
+
+def send_interview_end(
+    channel: Any,
+    total_questions: int,
+    answered: int,
+    skipped: int,
+    per_question_scores: list | None = None,
+    avg_total_score: float = 0.0,
+) -> None:
+    """Notify the client that the interview is complete."""
+    send_event(channel, "interview_end", {
+        "total_questions": total_questions,
+        "answered": answered,
+        "skipped": skipped,
+        "per_question_scores": per_question_scores or [],
+        "avg_total_score": avg_total_score,
+    })
+
+
+def send_answer_complete(
+    channel: Any,
+    completeness_score: float,
+    signals: dict,
+) -> None:
+    """Notify the client that an answer has been deemed complete."""
+    send_event(channel, "answer_complete", {
+        "completeness_score": round(completeness_score, 3),
+        "signals": signals,
+    })
+
+
 def parse_au_telemetry(data: bytes) -> Optional[AUTelemetry]:
     """
     Parse binary AU telemetry packet (20 bytes).

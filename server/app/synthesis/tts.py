@@ -430,16 +430,21 @@ class TTSEngine:
     def engine_name(self) -> str:
         return self._engine_name
 
-    async def synthesize(self, text: str) -> TTSResult:
-        """Synthesize *text* to PCM int16 audio."""
+    async def synthesize(self, text: str, voice: str | None = None) -> TTSResult:
+        """Synthesize *text* to PCM int16 audio.
+
+        If *voice* is given, it overrides the default voice for edge-tts calls.
+        """
         if not text or not text.strip():
             return _synthesize_silence(0.2)
+
+        effective_voice = voice or self.voice
 
         if self._engine_name == "chatterbox-turbo":
             return await self._synthesize_chatterbox(text)
         if self._engine_name == "edge-tts":
             try:
-                return await _synthesize_edge(text, self.voice)
+                return await _synthesize_edge(text, effective_voice)
             except Exception as exc:
                 logger.warning("edge-tts failed (%s) — falling back to tone", exc)
                 return _synthesize_tone(text)

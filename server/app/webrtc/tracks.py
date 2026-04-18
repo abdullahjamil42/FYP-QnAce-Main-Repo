@@ -40,7 +40,11 @@ def resample_linear(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarr
 
 def to_mono_int16(frame_data: np.ndarray, channels: int) -> np.ndarray:
     """Convert multi-channel audio to mono int16."""
-    if frame_data.dtype != np.int16:
+    if frame_data.dtype in (np.float32, np.float64):
+        # aiortc decodes Opus as float32 in [-1.0, 1.0] — scale to int16 range
+        frame_data = np.clip(frame_data, -1.0, 1.0)
+        frame_data = (frame_data * 32767).astype(np.int16)
+    elif frame_data.dtype != np.int16:
         frame_data = frame_data.astype(np.int16)
     if channels > 1 and len(frame_data) >= channels:
         # Reshape to (samples, channels) and mean across channels

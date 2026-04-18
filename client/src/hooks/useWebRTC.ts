@@ -29,6 +29,11 @@ function getApiUrl(): string {
   return "http://127.0.0.1:8000";
 }
 
+export interface InterviewConfig {
+  jobRole: string;
+  interviewType: "quick" | "extensive";
+}
+
 export function useWebRTC() {
   const [state, setState] = useState<ConnectionState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +85,7 @@ export function useWebRTC() {
   }, [isCamEnabled]);
 
   // ── Start session ──
-  const start = useCallback(async () => {
+  const start = useCallback(async (config?: InterviewConfig) => {
     setState("connecting");
     setError(null);
 
@@ -127,10 +132,11 @@ export function useWebRTC() {
         pc.addTrack(track, audioStream);
       }
 
-      // 3b. Advertise receive capability for server-returned TTS audio and avatar video.
+      // 3b. Advertise receive capability for server-returned TTS audio, backchannel audio, and avatar video.
       // Without these transceivers, the offer may omit recv media sections and aiortc
       // cannot legally attach outbound tracks while generating the answer.
-      pc.addTransceiver("audio", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" }); // TTS track
+      pc.addTransceiver("audio", { direction: "recvonly" }); // Backchannel track
       pc.addTransceiver("video", { direction: "recvonly" });
 
       // 4. Create DataChannel BEFORE offer (so it's in the SDP)
@@ -161,13 +167,16 @@ export function useWebRTC() {
         }
       };
 
-      // 5b. Handle incoming tracks from server (TTS audio + avatar video)
+      // 5b. Handle incoming tracks from server (TTS audio + backchannel audio + avatar video)
+      // Multiple audio tracks are combined into one MediaStream so the browser mixes them.
+      const combinedAudio = new MediaStream();
       pc.ontrack = (ev) => {
         const track = ev.track;
-        const stream = ev.streams[0] || new MediaStream([track]);
         if (track.kind === "audio") {
-          setRemoteAudioStream(stream);
+          combinedAudio.addTrack(track);
+          setRemoteAudioStream(new MediaStream(combinedAudio.getAudioTracks()));
         } else if (track.kind === "video") {
+          const stream = ev.streams[0] || new MediaStream([track]);
           setRemoteVideoStream(stream);
         }
       };
@@ -184,6 +193,8 @@ export function useWebRTC() {
         body: JSON.stringify({
           sdp: pc.localDescription!.sdp,
           type: pc.localDescription!.type,
+          job_role: config?.jobRole ?? "software_engineer",
+          interview_type: config?.interviewType ?? "quick",
         }),
       });
 

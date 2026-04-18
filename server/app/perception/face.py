@@ -1,27 +1,27 @@
 """
-Q&Ace — EfficientNet-B2 Face Emotion Classifier (ONNX, CPU).
+Q&Ace — EfficientNet-B2 Face Emotion Classifier (PyTorch, CPU).
 
 Architecture per ADR-003:
-  - EfficientNet-B2 runs on CPU ONNX to avoid GPU contention.
-  - Input: 224×224 RGB face crop (uint8 numpy array).
+  - EfficientNet-B2 runs on CPU to avoid GPU contention.
+  - Input: face crop numpy array (any size, resized to 260×260 internally).
   - Output: FaceResult with emotion classification + probabilities.
-  - Target: <5ms per inference on CPU.
-  - Model source: `abdullahjamil42/QnAce-Face-Model`
+  - Model source: `abdullahjamil42/QnAce-Face-Model` (local copy)
 """
 
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 
 logger = logging.getLogger("qace.face")
 
-# Emotion labels for our custom-trained EfficientNet-B2
-# These map to interview-relevant emotional states
+# Emotion labels from QnAce-Face-Model (7 classes)
 FACE_EMOTION_LABELS = [
     "angry",
     "disgusted",
@@ -43,9 +43,12 @@ INTERVIEW_FACE_EMOTIONS = {
     "surprised": "engaged",
 }
 
-# ImageNet normalization (EfficientNet)
+# ImageNet normalization (EfficientNet-B2 standard)
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+# Model expects 260×260 input (from preprocessor_config.json)
+MODEL_INPUT_SIZE = 260
 
 
 @dataclass
@@ -55,30 +58,6 @@ class FaceResult:
     emotion_probs: dict[str, float] = field(default_factory=dict)
     confidence: float = 0.0
     inference_ms: float = 0.0
-
-
-def preprocess_face(image: np.ndarray) -> np.ndarray:
-    """
-    Preprocess a face crop for EfficientNet-B2 inference.
-
-    Input: HWC uint8 RGB image (ideally 224×224).
-    Output: NCHW float32 tensor, ImageNet-normalized.
-    """
-    # Resize to 224×224 if needed (bilinear, no scipy/PIL)
-    if image.shape[:2] != (224, 224):
-        image = _resize_bilinear(image, 224, 224)
-
-    # uint8 → float32 [0, 1]
-    img_f32 = image.astype(np.float32) / 255.0
-
-    # ImageNet normalize
-    img_f32 = (img_f32 - IMAGENET_MEAN) / IMAGENET_STD
-
-    # HWC → CHW → NCHW
-    img_f32 = np.transpose(img_f32, (2, 0, 1))  # CHW
-    img_f32 = np.expand_dims(img_f32, axis=0)  # NCHW
-
-    return img_f32
 
 
 def _resize_bilinear(image: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
@@ -98,28 +77,43 @@ def _resize_bilinear(image: np.ndarray, target_h: int, target_w: int) -> np.ndar
     col_ceil = np.minimum(col_floor + 1, w - 1)
     col_frac = col_indices - col_floor
 
-    # Bilinear interpolation
     result = np.zeros((target_h, target_w, image.shape[2] if image.ndim == 3 else 1), dtype=image.dtype)
     for i in range(target_h):
         for j in range(target_w):
             rf, rc = row_floor[i], row_ceil[i]
             cf, cc = col_floor[j], col_ceil[j]
             ry, rx = row_frac[i], col_frac[j]
-
-            val = (
+            result[i, j] = (
                 image[rf, cf] * (1 - ry) * (1 - rx)
                 + image[rf, cc] * (1 - ry) * rx
                 + image[rc, cf] * ry * (1 - rx)
                 + image[rc, cc] * ry * rx
             )
-            result[i, j] = val
-
     return result
+
+
+def preprocess_face(image: np.ndarray) -> "torch.Tensor":
+    """
+    Preprocess a face crop for QnAce-Face-Model inference.
+
+    Input: HWC uint8 RGB image (any size).
+    Output: NCHW float32 tensor, ImageNet-normalised, 260×260.
+    """
+    import torch
+
+    if image.shape[:2] != (MODEL_INPUT_SIZE, MODEL_INPUT_SIZE):
+        image = _resize_bilinear(image, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE)
+
+    img_f32 = image.astype(np.float32) / 255.0
+    img_f32 = (img_f32 - IMAGENET_MEAN) / IMAGENET_STD
+    img_f32 = np.transpose(img_f32, (2, 0, 1))          # HWC → CHW
+    tensor = torch.from_numpy(img_f32).unsqueeze(0)      # → NCHW
+    return tensor
 
 
 def classify(face_crop: np.ndarray, face_model: Any) -> FaceResult:
     """
-    Classify face emotion from a 224×224 RGB crop using EfficientNet-B2 ONNX.
+    Classify face emotion from an RGB face crop using QnAce-Face-Model.
 
     Falls back to neutral if model is unavailable.
     """
@@ -141,25 +135,20 @@ def classify(face_crop: np.ndarray, face_model: Any) -> FaceResult:
     t0 = time.perf_counter()
 
     try:
-        # Preprocess
-        input_tensor = preprocess_face(face_crop)
+        import torch
 
-        # ONNX inference — always CPU (per ADR-003)
-        input_name = face_model.get_inputs()[0].name
-        output_name = face_model.get_outputs()[0].name
-        logits = face_model.run([output_name], {input_name: input_tensor})[0]
+        tensor = preprocess_face(face_crop)
 
-        # Softmax
-        logits = logits.squeeze()
-        exp_logits = np.exp(logits - np.max(logits))
-        probs = exp_logits / exp_logits.sum()
+        with torch.no_grad():
+            outputs = face_model(tensor)
+            # FacialEmotionModel returns ImageClassifierOutput; logits field
+            logits = outputs.logits if hasattr(outputs, "logits") else outputs
+            probs = torch.nn.functional.softmax(logits.squeeze(), dim=-1).cpu().numpy()
 
-        # Map to emotion labels
         emotion_probs: dict[str, float] = {}
         for i, label in enumerate(FACE_EMOTION_LABELS):
             if i < len(probs):
                 mapped = INTERVIEW_FACE_EMOTIONS.get(label, label)
-                # Accumulate if same mapped label
                 emotion_probs[mapped] = emotion_probs.get(mapped, 0.0) + round(float(probs[i]), 4)
 
         max_idx = int(np.argmax(probs))
@@ -168,7 +157,7 @@ def classify(face_crop: np.ndarray, face_model: Any) -> FaceResult:
         confidence = float(probs[max_idx])
 
     except Exception as exc:
-        logger.error("EfficientNet inference error: %s", exc)
+        logger.error("Face model inference error: %s", exc)
         emotion_probs = {"composed": 1.0}
         dominant = "neutral"
         confidence = 0.0

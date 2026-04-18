@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
-from .llm import LLMProviderConfig, resolve_provider_config, stream_llm
+from .llm import LOCAL_PROVIDER, LLMProviderConfig, resolve_provider_config, stream_llm
 
 logger = logging.getLogger("qace.interviewer")
 
@@ -58,6 +58,14 @@ CLARIFICATION_PATTERNS = [
     re.compile(r"\bwhat\s+do\s+you\s+mean\b", re.IGNORECASE),
     re.compile(r"\bdo\s+you\s+mean\b", re.IGNORECASE),
     re.compile(r"\bwhich\s+part\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+kind\s+of\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+type\s+of\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+sort\s+of\b", re.IGNORECASE),
+    re.compile(r"\bwhich\s+one\b", re.IGNORECASE),
+    re.compile(r"\bcould\s+you\s+repeat\b", re.IGNORECASE),
+    re.compile(r"\bcan\s+you\s+repeat\b", re.IGNORECASE),
+    re.compile(r"\bsay\s+that\s+again\b", re.IGNORECASE),
+    re.compile(r"\bcould\s+you\s+rephrase\b", re.IGNORECASE),
 ]
 
 HINT_PATTERNS = [
@@ -257,6 +265,32 @@ def _detect_reframe(answer: str) -> bool:
     return any(p.search(answer or "") for p in CLARIFICATION_PATTERNS)
 
 
+CANDIDATE_VOICE_OPENINGS = (
+    "i have answered",
+    "i already answered",
+    "i already said",
+    "i just said",
+    "as i said",
+    "as i mentioned",
+    "as i already",
+    "why are you asking",
+    "you already asked",
+    "you just asked",
+    "i don't understand why",
+    "i do not understand why",
+)
+
+
+def _is_candidate_voice_opening(text: str) -> bool:
+    head = (text or "").strip().lower().lstrip("\"'.,!? ")
+    # Strip a short acknowledgement prefix if present (mm-hm, okay, right, got it)
+    for ack in ("mm-hm", "mmhm", "mm hm", "okay", "ok", "right", "got it", "i see", "interesting"):
+        if head.startswith(ack):
+            head = head[len(ack):].lstrip(" ,.—-")
+            break
+    return any(head.startswith(p) for p in CANDIDATE_VOICE_OPENINGS)
+
+
 def _question_stats(state: dict[str, Any], question: str) -> dict[str, int]:
     key = _question_key(question)
     stats = state["question_stats"].get(key)
@@ -328,7 +362,7 @@ def _override_model(provider: LLMProviderConfig, model_name: str) -> LLMProvider
             model = provider.model
     else:
         model = override or provider.model
-    return LLMProviderConfig(provider=provider.provider, api_key=provider.api_key, model=model)
+    return LLMProviderConfig(provider=provider.provider, api_key=provider.api_key, model=model, options=dict(provider.options))
 
 
 async def _collect_stream(
@@ -413,57 +447,85 @@ def _parse_classifier_output(text: str) -> Optional[dict[str, Any]]:
     }
 
 
-def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str]) -> str:
+def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str], cv_summary: str = "") -> str:
     base = (
+        "ROLE LOCK: You are the INTERVIEWER. You are NOT the candidate. "
+        "Never speak in the candidate's first-person voice. "
+        "Never begin a response with phrases like 'I have answered', 'I already said', 'as I mentioned', 'why are you asking'. "
+        "Never echo the candidate's own question back to them as if you were asking it. "
         "You are a senior interviewer at a competitive software company. "
-        "Tone is warm, direct, curious, and professional. "
-        "Do not use bullet points, headers, or lists. "
-        "Do not say great answer, interesting, absolutely, or reflexive praise. "
-        "Do not reveal rubric or ideal answer. "
-        "Always respond in 2 to 3 spoken sentences optimized for TTS."
+        "You are conducting a live interview and must respond naturally as a real person would. "
+        "Tone is warm but direct, like a curious and experienced colleague. "
+        "Begin with a brief, varied natural acknowledgement (for example: mm-hm, got it, okay, right, interesting) — keep it under four words and do not reuse the same one repeatedly. "
+        "Do not use bullet points, headers, lists, or markdown formatting. "
+        "Do not say great answer, absolutely, or give reflexive praise. "
+        "Do not reveal the rubric or the ideal answer. "
+        "Do NOT restate or repeat the original question back to the candidate — they have already heard it. "
+        "Your response MUST reference the candidate's actual answer — quote or paraphrase what they said. "
+        "Keep your response to 2 spoken sentences maximum, optimized for text-to-speech. "
+        "The payload contains candidate_transcript (the answer you are responding to RIGHT NOW) and recent_turns (earlier Q/A pairs, for continuity only). "
+        "You MUST only quote, paraphrase, or reference candidate_transcript. "
+        "NEVER quote, paraphrase, or attribute content from recent_turns to the candidate as if they just said it — those are prior turns, already addressed. "
+        "If candidate_transcript is empty, one word, or clearly does not address current_question, acknowledge that and restate the question — do not invent content the candidate did not say."
     )
+    if cv_summary:
+        base += (
+            " You have the candidate's CV summary below — when it is relevant, "
+            "ground your probe in specific projects, skills, or experience they listed. "
+            "Do not invent details that are not in the CV.\n"
+            "CV SUMMARY:\n" + cv_summary[:1200]
+        )
 
     mode_directives = {
         "ADVANCE": (
-            "Acknowledge briefly in one clause, then transition naturally to the next question. "
-            "Keep momentum and avoid over-praise."
+            "Briefly acknowledge one specific thing the candidate said well, then naturally transition "
+            "to the next question. Do not over-praise."
         ),
         "PROBE_DEPTH": (
-            "Answer is surface-level but directionally correct. "
-            "Anchor on a concrete phrase the candidate used and probe one level deeper. "
-            "Do not ask generic tell me more questions."
+            "The candidate's answer is surface-level but on the right track. "
+            "Pick a specific claim or phrase from their answer and ask them to go deeper. "
+            "For example, if they said they 'used caching', ask what caching strategy, what eviction policy, "
+            "and what the cache hit rate was. Be specific to THEIR answer, not generic."
         ),
         "PROBE_GAP": (
-            "Acknowledge the part that is correct without implying completeness. "
-            "Probe the missing dimension with curiosity, not correction."
+            "The candidate missed an important dimension of the question. "
+            "Acknowledge what they covered, then ask about the specific missing part. "
+            "Your follow-up should sound like a natural clarifying question from an experienced interviewer, "
+            "not a teacher correcting a student."
         ),
         "REDIRECT": (
-            "Answer is off-topic. "
-            "If this is first redirect, briefly acknowledge and gently steer back with let's bring it back to. "
-            "If this is second or more redirect, restate the question near-verbatim with no softening."
+            "The candidate's answer is off-topic or not addressing the question. "
+            "If this is the first redirect, gently steer back: 'I appreciate that context, but let me bring us back to...'. "
+            "If second redirect, restate the question directly."
         ),
         "CHALLENGE": (
-            "Candidate may be bluffing or overclaiming. "
-            "Ask for one concrete decision, number, or measurable outcome they personally owned. "
-            "Force specifics that cannot be answered in generalities."
+            "The candidate made bold claims without specifics. "
+            "Ask for one concrete example: a specific decision THEY made, a real number, or a measurable result. "
+            "Sound curious, not accusatory — like you genuinely want to understand their contribution."
         ),
         "RESCUE": (
-            "Candidate appears stuck. Offer a simpler starting angle without giving away the answer. "
-            "Ask them to begin with what they do know."
+            "The candidate is clearly stuck or struggling. Be supportive without giving away the answer. "
+            "Simplify the question or offer a starting angle: 'Let me put it this way...' or "
+            "'What if we narrow this down to just...'. Help them find solid ground."
         ),
         "INTERRUPT": (
-            "Candidate has over-talked. Wait for a natural breath, acknowledge you heard them, "
-            "then pivot with a focused question anchored to a phrase from the second half of their response."
+            "The candidate has been talking too long. Politely interject: "
+            "'Let me pause you there.' Then pick the most interesting thing from the second half "
+            "of their answer and ask a focused question about just that."
         ),
         "CONFRONT": (
-            "Surface the contradiction directly but non-accusatorily. Quote both claims briefly and invite reconciliation."
+            "The candidate contradicted something they said earlier. "
+            "Bring it up non-accusatorily: 'Earlier you mentioned X, but just now you said Y. "
+            "Can you help me understand which is accurate?'"
         ),
         "ACKNOWLEDGE_IDK": (
-            "Candidate calmly admitted not knowing. Acknowledge briefly, then move to next question or adjacent angle."
+            "The candidate admitted they do not know. Respond supportively: "
+            "'That is okay, not everyone has experience with that.' "
+            "Then move to the next question naturally."
         ),
         "REFRAME": (
-            "Candidate asked for clarification. Clarify the ambiguity directly without repeating the whole question, "
-            "then invite their answer."
+            "The candidate asked for clarification. Answer their question briefly and specifically, "
+            "then redirect them to answer. Do not repeat the entire question."
         ),
     }
 
@@ -535,6 +597,8 @@ def _fallback_classification(
         mode = "ACKNOWLEDGE_IDK" if vocal_confidence >= 0.55 else "RESCUE"
     elif rag_relevance < 0.20 and _jaccard(answer, current_question) < 0.18:
         mode = "REDIRECT"
+    elif len(answer.split()) <= 6 and _jaccard(answer, current_question) < 0.25:
+        mode = "REDIRECT"
     elif "bluff" in active_flags:
         mode = "CHALLENGE"
     elif text_quality_score >= 78.0 and rag_relevance >= 0.45:
@@ -565,27 +629,27 @@ def _fallback_spoken(
     if mode == "ADVANCE":
         return f"Okay, good. Let us move forward. {next_question}"
     if mode == "PROBE_DEPTH":
-        return f"Right, I heard your point about {anchor}. Walk me one level deeper into how you executed that decision."
+        return f"You mentioned {anchor}. Can you walk me through the specific steps you took and what the outcome was?"
     if mode == "PROBE_GAP":
-        return f"You covered part of it, and that helps. What about {anchor} was most critical when this was under real pressure?"
+        return f"That is a good start. I noticed you did not touch on {anchor} though. How would you approach that part specifically?"
     if mode == "REDIRECT":
         if redirect_count <= 1:
-            return f"I hear you. Let us bring it back to the question. {next_question}"
+            return f"I appreciate the context. Let us bring it back to the original question though. {next_question}"
         return next_question
     if mode == "CHALLENGE":
         if "overclaim" in active_flags:
-            return "Be specific about your personal role. What exact decision did you make yourself, and what measurable result changed because of your decision?"
-        return "Give me one concrete example from real work, including a specific decision and measurable outcome."
+            return "I would like to understand your personal contribution. What specific decision did you make, and what measurable result did it produce?"
+        return "Can you give me a concrete example from your own experience? I am looking for a specific situation, what you did, and the result."
     if mode == "RESCUE":
-        return "That is okay. Start with the first part you are confident about, then we can build from there. What do you know for sure about this problem?"
+        return "No worries. Let us simplify this. What is the first thing that comes to mind when you think about this problem? Start there."
     if mode == "INTERRUPT":
-        return f"I am going to pause you there for time. I heard your point about {anchor}. What is the single most important takeaway in one sentence?"
+        return f"Let me pause you there. You mentioned {anchor}. Can you summarize your main point in one sentence?"
     if mode == "CONFRONT":
-        return f"I want to reconcile something before we continue. {contradiction_evidence} Can you clarify which version is accurate?"
+        return f"Before we move on, I want to clarify something. {contradiction_evidence} Which one is accurate?"
     if mode == "ACKNOWLEDGE_IDK":
-        return f"Understood. Let us keep momentum with a related angle. {next_question}"
+        return f"That is completely fine. Let us move on. {next_question}"
     if mode == "REFRAME":
-        return "Good question. Focus on the concrete decisions and trade-offs you made, not generic theory. Can you answer it from that angle?"
+        return "Let me rephrase that. Think about a specific situation you have been in. What decisions did you make and what trade-offs were involved?"
     return next_question
 
 
@@ -605,6 +669,7 @@ async def generate_interviewer_turn(
     monologue_flag: bool,
     next_question: str,
     settings: Any,
+    cv_summary: str = "",
     on_generator_sentence_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> dict[str, Any]:
     """Run classifier call then generator call and update persistent interviewer state."""
@@ -638,7 +703,42 @@ async def generate_interviewer_turn(
     classifier_ms = 0.0
     classifier_ttft_ms = 0.0
 
+    answer_norm = _normalize_text(transcript)
+    answer_words = len(answer_norm.split())
+    if answer_words <= 6 and _jaccard(answer_norm, current_question) < 0.25:
+        # Short + low overlap with current question. Run the deterministic
+        # classifier — it already routes to REFRAME / ACKNOWLEDGE_IDK / RESCUE /
+        # REDIRECT as appropriate. Skipping the cloud classifier prevents it
+        # from hallucinating an anchor from recent_turns.
+        classifier_result = _fallback_classification(
+            transcript=transcript,
+            current_question=current_question,
+            rag_relevance=0.0,
+            vocal_confidence=vocal_confidence,
+            text_quality_score=text_quality_score,
+            active_flags=active_flags,
+            monologue_flag=False,
+        )
+        classifier_result["follow_up_anchor"] = ""
+
     recent_turns = _last_n_turns(history, history_window)
+    # Drop meta / frustration turns so the generator LLM does not echo them
+    # back as if the candidate just said them.
+    META_ANSWER_PATTERNS = (
+        "why are you asking",
+        "i have answered",
+        "i already answered",
+        "you already asked",
+        "you just asked",
+        "asked me this",
+    )
+    recent_turns = [
+        t for t in recent_turns
+        if not any(
+            p in (_normalize_text(str(t.get("answer", "")))).lower()
+            for p in META_ANSWER_PATTERNS
+        )
+    ]
     previous_mode_norm = (previous_mode or "").strip().upper()
     if previous_mode_norm not in MODES and state.get("last_modes"):
         previous_mode_norm = str(state["last_modes"][-1]).upper()
@@ -656,7 +756,10 @@ async def generate_interviewer_turn(
         "seed_flags": active_flags,
     }
 
-    if provider is not None:
+    # Local provider: skip LLM classifier — evaluator adapter is fine-tuned for
+    # coaching feedback text, not structured JSON output, so the classifier call
+    # always fails to parse and wastes 2-4s. Use deterministic fallback directly.
+    if provider is not None and provider.provider != LOCAL_PROVIDER:
         try:
             cls_model = getattr(settings, "interviewer_classifier_model", "")
             cls_cfg = _override_model(provider, cls_model)
@@ -689,6 +792,19 @@ async def generate_interviewer_turn(
     mode = str(classifier_result.get("mode", "PROBE_GAP")).upper()
     evidence = _normalize_text(str(classifier_result.get("evidence", ""))) or "Mode selected by policy."
     follow_up_anchor = _normalize_text(str(classifier_result.get("follow_up_anchor", "")))
+    if follow_up_anchor:
+        anchor_norm = follow_up_anchor.lower().strip()
+        transcript_norm = _normalize_text(transcript).lower()
+        if anchor_norm not in transcript_norm:
+            words = anchor_norm.split()
+            ok = False
+            for i in range(len(words) - 3):
+                if " ".join(words[i:i + 4]) in transcript_norm:
+                    ok = True
+                    break
+            if not ok:
+                logger.info("Rejecting classifier anchor (not in current answer): %r", follow_up_anchor)
+                follow_up_anchor = ""
     cls_flags = [f for f in classifier_result.get("active_flags", []) if f in ALLOWED_FLAGS]
     for f in active_flags:
         if f not in cls_flags:
@@ -715,7 +831,14 @@ async def generate_interviewer_turn(
     if not session_summary:
         session_summary = _compress_session_summary(history, summary_max_chars)
 
-    generator_prompt = _build_mode_prompt(mode, redirect_count, cls_flags)
+    generator_prompt = _build_mode_prompt(mode, redirect_count, cls_flags, cv_summary=cv_summary)
+    logger.info(
+        "Interviewer turn: mode=%s q=%r transcript=%r anchor=%r",
+        mode,
+        _normalize_text(current_question)[:60],
+        _normalize_text(transcript)[:60],
+        follow_up_anchor[:60],
+    )
     generator_payload = {
         "mode": mode,
         "evidence": evidence,
@@ -744,7 +867,17 @@ async def generate_interviewer_turn(
     generator_ms = 0.0
     streamed_chunk_count = 0
 
-    if provider is not None:
+    # Local models are small and hallucinate badly on template-friendly modes
+    # (they tend to echo the candidate's voice or repeat the question). Skip
+    # the generator and use the deterministic _fallback_spoken template for
+    # those modes instead.
+    TEMPLATE_MODES = {"REDIRECT", "REFRAME", "ACKNOWLEDGE_IDK", "RESCUE", "ADVANCE"}
+    is_local_provider = provider is not None and provider.provider == LOCAL_PROVIDER
+    skip_generator = is_local_provider and mode in TEMPLATE_MODES
+    if skip_generator:
+        logger.info("Skipping generator LLM for local provider + mode=%s", mode)
+
+    if provider is not None and not skip_generator:
         try:
             gen_model = getattr(settings, "interviewer_generator_model", "")
             gen_cfg = _override_model(provider, gen_model)
@@ -753,6 +886,7 @@ async def generate_interviewer_turn(
             pending = ""
             emitted_sentences: list[str] = []
             sentence_limit = 3
+            rejected_candidate_voice = False
             async for token in stream_llm(
                 json.dumps(generator_payload, ensure_ascii=True),
                 generator_prompt,
@@ -767,6 +901,13 @@ async def generate_interviewer_turn(
 
                 completed, pending = _drain_completed_sentences(pending)
                 for sentence in completed:
+                    if not emitted_sentences and _is_candidate_voice_opening(sentence):
+                        logger.warning(
+                            "Rejecting candidate-voice generator opening: %r",
+                            sentence[:120],
+                        )
+                        rejected_candidate_voice = True
+                        break
                     emitted_sentences.append(sentence)
                     if on_generator_sentence_chunk is not None:
                         try:
@@ -776,12 +917,16 @@ async def generate_interviewer_turn(
                             logger.warning("Generator chunk callback failed (%s)", exc)
                     if len(emitted_sentences) >= sentence_limit:
                         break
-                if len(emitted_sentences) >= sentence_limit:
+                if rejected_candidate_voice or len(emitted_sentences) >= sentence_limit:
                     break
 
-            if pending.strip() and len(emitted_sentences) < sentence_limit:
+            if (
+                not rejected_candidate_voice
+                and pending.strip()
+                and len(emitted_sentences) < sentence_limit
+            ):
                 tail = _normalize_text(pending)
-                if tail:
+                if tail and not (not emitted_sentences and _is_candidate_voice_opening(tail)):
                     emitted_sentences.append(tail)
                     if on_generator_sentence_chunk is not None:
                         try:
@@ -790,9 +935,18 @@ async def generate_interviewer_turn(
                         except Exception as exc:
                             logger.warning("Generator tail callback failed (%s)", exc)
 
-            spoken_response = _normalize_text(" ".join(emitted_sentences))
-            if not spoken_response:
-                spoken_response = _normalize_text("".join(tokens))
+            if rejected_candidate_voice:
+                spoken_response = ""
+            else:
+                spoken_response = _normalize_text(" ".join(emitted_sentences))
+                if not spoken_response:
+                    spoken_response = _normalize_text("".join(tokens))
+                    if _is_candidate_voice_opening(spoken_response):
+                        logger.warning(
+                            "Rejecting candidate-voice generator output (unsegmented): %r",
+                            spoken_response[:120],
+                        )
+                        spoken_response = ""
 
             generator_ms = (time.perf_counter() - t_gen_start) * 1000.0
         except Exception as exc:

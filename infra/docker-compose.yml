@@ -1,18 +1,83 @@
 version: "3.9"
 
+x-logging: &default-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "100M"
+
 services:
+  # Judge0 CE — code execution (internal 2358)
+  judge0-db:
+    image: postgres:16.2
+    env_file: judge0.conf
+    volumes:
+      - judge0_pg_data:/var/lib/postgresql/data
+    <<: *default-logging
+    restart: unless-stopped
+
+  judge0-redis:
+    image: redis:7.2.4
+    command:
+      [
+        "bash",
+        "-c",
+        'docker-entrypoint.sh --appendonly no --requirepass "$$REDIS_PASSWORD"',
+      ]
+    env_file: judge0.conf
+    <<: *default-logging
+    restart: unless-stopped
+
+  judge0:
+    image: judge0/judge0:latest
+    hostname: judge0
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    ports:
+      - "2358:2358"
+    privileged: true
+    depends_on:
+      - judge0-db
+      - judge0-redis
+    environment:
+      - REDIS_HOST=judge0-redis
+      - POSTGRES_HOST=judge0-db
+    <<: *default-logging
+    restart: unless-stopped
+
+  judge0-worker:
+    image: judge0/judge0:latest
+    command: ["./scripts/workers"]
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    privileged: true
+    depends_on:
+      - judge0-db
+      - judge0-redis
+      - judge0
+    environment:
+      - REDIS_HOST=judge0-redis
+      - POSTGRES_HOST=judge0-db
+    <<: *default-logging
+    restart: unless-stopped
+
   backend:
     build:
       context: ../server
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    depends_on:
+      - judge0
     environment:
       - QACE_ENV=development
       - QACE_HOST=0.0.0.0
       - QACE_PORT=8000
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - QACE_MODEL_DIR=/app/models
+      - JUDGE0_API_URL=http://judge0:2358
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
     volumes:
       - ../models:/app/models:ro
       - ../data:/app/data:ro
@@ -36,3 +101,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  judge0_pg_data:

@@ -1,0 +1,29 @@
+{
+  "model_type": "qnace-emotion",
+  "task": "audio-classification",
+  "num_labels": 6,
+  "id2label": {
+    "0": "anger",
+    "1": "fear",
+    "2": "happy",
+    "3": "neutral",
+    "4": "sad",
+    "5": "surprise"
+  },
+  "label2id": {
+    "anger": 0,
+    "fear": 1,
+    "happy": 2,
+    "neutral": 3,
+    "sad": 4,
+    "surprise": 5
+  },
+  "sample_rate": 16000,
+  "max_length_seconds": 8.0,
+  "hidden_size": 768,
+  "dropout": 0.3,
+  "base_model": "facebook/wav2vec2-base",
+  "architectures": [
+    "EmotionModel"
+  ]
+}

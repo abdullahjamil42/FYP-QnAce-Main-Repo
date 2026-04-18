@@ -9,16 +9,36 @@ import json
 import os
 from pathlib import Path
 import threading
+import urllib.request as urllib_request
 import zipfile
-from typing import Any, AsyncIterator, Optional
-from urllib import request as urllib_request
+from typing import Any, AsyncIterator
+
+import httpx
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("qace.llm")
+
+LOCAL_LLM_SERVER_URL = "http://localhost:8081"
 
 GROQ_PROVIDER = "groq"
 AIRFORCE_PROVIDER = "airforce"
 LOCAL_PROVIDER = "local"
 AUTO_PROVIDER = "auto"
+
+
+# For local LLM server, this is httpx.AsyncClient.
+# For Groq, this is the Groq client.
+LLMProvider = httpx.AsyncClient | Any
+
+
+class ProviderConfig(BaseModel):
+    """Configuration for an LLM provider, resolved from settings."""
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    provider: str
+    client: LLMProvider
+    model: str
 
 
 @dataclass
@@ -37,6 +57,22 @@ class LLMProviderConfig:
     api_key: str
     model: str
     options: dict[str, Any] = field(default_factory=dict)
+
+
+async def swap_adapter(adapter: str) -> bool:
+    """Call the local LLM wrapper server to hot-swap the LoRA adapter."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{LOCAL_LLM_SERVER_URL}/swap-adapter/{adapter}")
+            if resp.status_code == 200:
+                logger.info("Swapped local LLM adapter to '%s'", adapter)
+                return True
+            else:
+                logger.warning("Adapter swap to '%s' returned %d", adapter, resp.status_code)
+                return False
+    except Exception as exc:
+        logger.warning("Could not swap adapter to '%s': %s", adapter, exc)
+        return False
 
 
 _LOCAL_MODEL = None
@@ -684,6 +720,8 @@ async def generate_feedback(
     transcript: str,
     system_prompt: str,
     provider_config: LLMProviderConfig,
+    temperature: float = 0.7,
+    max_tokens: int = 120,
 ) -> LLMStreamResult:
     """
     Non-streaming convenience: collects all tokens and returns full text + timing.
@@ -693,7 +731,9 @@ async def generate_feedback(
     t0 = time.perf_counter()
     ttft = 0.0
 
-    async for token in stream_llm(transcript, system_prompt, provider_config):
+    async for token in stream_llm(
+        transcript, system_prompt, provider_config, temperature, max_tokens
+    ):
         if not tokens:
             ttft = (time.perf_counter() - t0) * 1000.0
         tokens.append(token)
@@ -708,3 +748,51 @@ async def generate_feedback(
         token_count=len(tokens),
         model=provider_config.model,
     )
+
+
+async def call_llm(
+    messages: list[dict],
+    provider_config: LLMProviderConfig,
+    temperature: float = 0.3,
+    max_tokens: int = 256,
+    timeout_s: float = 3.0,
+) -> str | None:
+    """
+    Non-streaming LLM call with timeout.
+
+    Reuses the same provider routing as ``stream_llm`` but makes a single
+    request and returns the full text.  Wrapped in ``asyncio.wait_for``
+    so a slow API response never blocks the interview pipeline.
+
+    Returns ``None`` on timeout or any exception — callers supply their
+    own fallback values.
+    """
+    import asyncio
+
+    system_msg = ""
+    user_msg = ""
+    for m in messages:
+        if m.get("role") == "system":
+            system_msg = m.get("content", "")
+        elif m.get("role") == "user":
+            user_msg = m.get("content", "")
+
+    async def _run() -> str:
+        result = await generate_feedback(
+            transcript=user_msg,
+            system_prompt=system_msg,
+            provider_config=provider_config,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return result.full_text
+
+    try:
+        text = await asyncio.wait_for(_run(), timeout=timeout_s)
+        return text if text else None
+    except asyncio.TimeoutError:
+        logger.warning("call_llm timed out after %.1fs", timeout_s)
+        return None
+    except Exception as exc:
+        logger.warning("call_llm failed: %s", exc)
+        return None

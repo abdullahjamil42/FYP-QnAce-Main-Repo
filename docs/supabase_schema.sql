@@ -25,6 +25,10 @@ create table if not exists public.interview_sessions (
 create index if not exists interview_sessions_user_created_idx
   on public.interview_sessions (user_id, created_at desc);
 
+-- Live coding round: full scoring JSON from POST /api/interview/submit
+alter table public.interview_sessions
+  add column if not exists coding_round jsonb;
+
 alter table public.interview_sessions enable row level security;
 
 drop policy if exists "Users can read own sessions" on public.interview_sessions;
@@ -218,6 +222,52 @@ create policy "Public read mcq questions"
 grant select on table public.mcq_topics to anon, authenticated;
 grant select on table public.mcq_subtopics to anon, authenticated;
 grant select on table public.mcq_questions to anon, authenticated;
+
+-- LeetCode-style problems (coding interview round)
+create table if not exists public.problems (
+  id uuid primary key default gen_random_uuid(),
+  external_slug text unique,
+  title text not null,
+  difficulty text not null default 'medium',
+  topics jsonb not null default '[]'::jsonb,
+  description text not null default '',
+  examples jsonb not null default '[]'::jsonb,
+  constraints text not null default '',
+  hints jsonb not null default '[]'::jsonb,
+  complexity_benchmark_stdin jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists problems_difficulty_idx on public.problems (difficulty);
+
+create table if not exists public.test_cases (
+  id uuid primary key default gen_random_uuid(),
+  problem_id uuid not null references public.problems(id) on delete cascade,
+  stdin text not null default '',
+  expected_output text not null default '',
+  is_hidden boolean not null default false,
+  sort_order integer not null default 0
+);
+
+create index if not exists test_cases_problem_idx on public.test_cases (problem_id, is_hidden, sort_order);
+
+alter table public.problems enable row level security;
+alter table public.test_cases enable row level security;
+
+drop policy if exists "Public read problems" on public.problems;
+create policy "Public read problems"
+  on public.problems
+  for select
+  using (true);
+
+drop policy if exists "Public read non-hidden test cases" on public.test_cases;
+create policy "Public read non-hidden test cases"
+  on public.test_cases
+  for select
+  using (is_hidden = false);
+
+grant select on table public.problems to anon, authenticated;
+grant select on table public.test_cases to anon, authenticated;
 
 insert into public.mcq_topics (id, title, description, default_questions, default_easy_pct, default_medium_pct, default_hard_pct)
 values

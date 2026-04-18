@@ -6,18 +6,25 @@ import AppShell from "@/components/AppShell";
 import { Badge, GlassCard } from "@/components/ui";
 import { fetchBackendHealth } from "@/lib/backend";
 import { loadSetupConfig } from "@/lib/interview-session-store";
+import { jobRoles, interviewTypes } from "@/lib/mock-data";
 
-const checks = [
-  { name: "Camera", value: "Ready", tone: "success" as const },
-  { name: "Microphone", value: "Ready", tone: "success" as const },
-  { name: "Network", value: "Stable 24ms", tone: "success" as const },
-  { name: "Noise Level", value: "Moderate", tone: "warning" as const },
-];
+type CheckStatus = "checking" | "ready" | "unavailable";
+
+interface DeviceCheck {
+  name: string;
+  status: CheckStatus;
+  detail: string;
+}
 
 export default function SessionLobbyPage() {
   const [setup, setSetup] = useState(loadSetupConfig());
   const [healthState, setHealthState] = useState<"checking" | "online" | "offline">("checking");
   const [models, setModels] = useState<Record<string, string | null>>({});
+  const [checks, setChecks] = useState<DeviceCheck[]>([
+    { name: "Camera", status: "checking", detail: "Checking..." },
+    { name: "Microphone", status: "checking", detail: "Checking..." },
+    { name: "Network", status: "checking", detail: "Checking..." },
+  ]);
 
   useEffect(() => {
     setSetup(loadSetupConfig());
@@ -25,25 +32,74 @@ export default function SessionLobbyPage() {
 
   useEffect(() => {
     let cancelled = false;
-    async function run() {
-      const health = await fetchBackendHealth();
-      if (cancelled) {
-        return;
+
+    async function checkCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach((t) => t.stop());
+        if (!cancelled) {
+          setChecks((prev) =>
+            prev.map((c) => c.name === "Camera" ? { ...c, status: "ready" as const, detail: "Ready" } : c)
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setChecks((prev) =>
+            prev.map((c) => c.name === "Camera" ? { ...c, status: "unavailable" as const, detail: "No access" } : c)
+          );
+        }
       }
+    }
+
+    async function checkMicrophone() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+        if (!cancelled) {
+          setChecks((prev) =>
+            prev.map((c) => c.name === "Microphone" ? { ...c, status: "ready" as const, detail: "Ready" } : c)
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setChecks((prev) =>
+            prev.map((c) => c.name === "Microphone" ? { ...c, status: "unavailable" as const, detail: "No access" } : c)
+          );
+        }
+      }
+    }
+
+    async function checkNetwork() {
+      const start = performance.now();
+      const health = await fetchBackendHealth();
+      const ping = Math.round(performance.now() - start);
+      if (cancelled) return;
+
       if (!health) {
         setHealthState("offline");
+        setChecks((prev) =>
+          prev.map((c) => c.name === "Network" ? { ...c, status: "unavailable" as const, detail: "Backend offline" } : c)
+        );
         return;
       }
       setHealthState("online");
       setModels(health.models || {});
+      setChecks((prev) =>
+        prev.map((c) => c.name === "Network" ? { ...c, status: "ready" as const, detail: `Stable ${ping}ms` } : c)
+      );
     }
-    void run();
-    return () => {
-      cancelled = true;
-    };
+
+    void checkCamera();
+    void checkMicrophone();
+    void checkNetwork();
+
+    return () => { cancelled = true; };
   }, []);
 
   const modelEntries = useMemo(() => Object.entries(models), [models]);
+  const allReady = checks.every((c) => c.status === "ready");
+  const roleName = jobRoles.find((r) => r.id === setup.jobRole)?.title ?? setup.jobRole;
+  const typeName = interviewTypes.find((t) => t.id === setup.interviewType)?.title ?? setup.interviewType;
 
   return (
     <AppShell
@@ -52,7 +108,10 @@ export default function SessionLobbyPage() {
       actions={
         <Link
           href="/session/live"
-          className="rounded-full bg-qace-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-400"
+          className={`rounded-full px-5 py-2.5 text-sm font-semibold text-white transition ${allReady
+              ? "bg-qace-primary hover:bg-indigo-400"
+              : "pointer-events-none bg-slate-600 opacity-50"
+            }`}
         >
           Enter Live Room
         </Link>
@@ -66,16 +125,31 @@ export default function SessionLobbyPage() {
             {checks.map((check) => (
               <div key={check.name} className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2">
                 <span className="text-sm text-qace-muted">{check.name}</span>
-                <Badge tone={check.tone}>{check.value}</Badge>
+                <Badge
+                  tone={
+                    check.status === "ready"
+                      ? "success"
+                      : check.status === "unavailable"
+                        ? "warning"
+                        : undefined
+                  }
+                >
+                  {check.detail}
+                </Badge>
               </div>
             ))}
           </div>
 
           <div className="card-glow mt-5 rounded-xl border border-white/10 bg-black/20 p-3 text-sm">
-            <p className="text-xs uppercase tracking-wide text-qace-muted">Session Setup</p>
-            <p className="mt-2 text-qace-muted">Mode: <span className="text-white capitalize">{setup.mode}</span></p>
-            <p className="text-qace-muted">Difficulty: <span className="text-white">{setup.difficulty}</span></p>
-            <p className="text-qace-muted">Duration: <span className="text-white">{setup.durationMinutes} min</span></p>
+            <p className="text-xs uppercase tracking-wide text-qace-muted">Interview Configuration</p>
+            <p className="mt-2 text-qace-muted">Role: <span className="text-white">{roleName}</span></p>
+            <p className="text-qace-muted">Format: <span className="text-white">{typeName}</span></p>
+            <p className="text-qace-muted">
+              Duration:{" "}
+              <span className="text-white">
+                {setup.durationMinutes > 0 ? `${setup.durationMinutes} min` : "Unlimited"}
+              </span>
+            </p>
           </div>
         </GlassCard>
 
@@ -83,12 +157,15 @@ export default function SessionLobbyPage() {
           <h2 className="text-lg font-semibold">Session Notes</h2>
           <ul className="mt-3 space-y-2 text-sm text-qace-muted">
             <li>Keep your camera at eye level and maintain natural eye contact.</li>
-            <li>Use concise STAR structure for behavioral prompts.</li>
-            <li>Pause before answering to improve clarity and confidence score.</li>
-            <li>Tap "Enter Live Room" once your environment is quiet.</li>
+            <li>Take your time — there are no time limits on thinking or answering.</li>
+            <li>Two interviewers will alternate questions — stay focused during transitions.</li>
+            <li>Tap &ldquo;Enter Live Room&rdquo; once your environment is quiet.</li>
           </ul>
           <div className="mt-5 rounded-xl border border-qace-accent/30 bg-qace-accent/10 p-3 text-sm text-qace-text">
-            Expected latency budget: under 800ms per turn in normal network conditions.
+            {setup.interviewType === "extensive"
+              ? "Extensive mode: facial and voice emotion analysis will be active throughout."
+              : "Quick mode: fast-paced 10-minute interview with focused questions."
+            }
           </div>
           <div className="card-glow mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-qace-muted">
             <div className="mb-2 flex items-center justify-between">

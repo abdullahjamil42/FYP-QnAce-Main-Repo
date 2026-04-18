@@ -14,10 +14,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .coaching import router as coaching_router
+from .coding.routes import router as coding_router
 from .config import get_settings
 from .intelligence.llm import check_local_llm_endpoint
 from .intelligence.rag import init_rag
 from .models.registry import prewarm_all
+from .preparation import router as preparation_router
 
 logger = logging.getLogger("qace")
 
@@ -89,6 +92,15 @@ async def health():
         },
     }
 
+
+# ── Coaching route ──
+app.include_router(coaching_router, prefix="/coaching", tags=["Coaching"])
+
+# ── Live coding round (Judge0 + Supabase problems) ──
+app.include_router(coding_router, prefix="/coding", tags=["Coding"])
+
+# ── Preparation route ──
+app.include_router(preparation_router, prefix="/preparation", tags=["Preparation"])
 
 # ── WebRTC signaling route (lazy import to avoid hard dep on aiortc) ──
 try:

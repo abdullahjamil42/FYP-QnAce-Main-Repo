@@ -10,8 +10,10 @@ Q&Ace — WebRTC Signaling (POST /offer → SDP answer).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+import random
 import uuid
 from typing import Any, Callable
 
@@ -27,42 +29,84 @@ _sessions: dict[str, dict[str, Any]] = {}
 _semantic_detector: Any = None
 
 INTRO_QUESTION = (
-    "Welcome to your software interview. Please start with a short introduction: "
+    "Welcome to your interview. Please start with a short introduction: "
     "your background, your current role, and one project you are proud of."
 )
 
-SOFTWARE_INTERVIEW_QUESTIONS = [
-    "Explain a backend system you built. What were the core components and trade-offs?",
-    "Tell me about a production bug you diagnosed. How did you isolate and fix it?",
-    "How do you design a REST API for reliability and versioning?",
-    "Describe a time you improved application performance. What metrics moved?",
-    "How would you design caching for a high-traffic read-heavy service?",
-    "What testing strategy do you use across unit, integration, and end-to-end tests?",
-    "Describe a difficult code review discussion and how you resolved it.",
-    "If you had to scale this app to 10x users, what would you change first?",
+SKIP_PHRASES = [
+    "Alright, let's move on to the next question.",
+    "No worries, let's continue with the next one.",
+    "Okay, moving forward to the next question.",
+    "Let's keep the momentum going. Next question.",
+    "That's fine, let's proceed to the next topic.",
+]
+
+SILENCE_TIMEOUT_SECONDS = 10
+
+# ── Acknowledgment phrase pools (Feature 3) ──────────────────────────────
+ACKNOWLEDGMENT_PHRASES = {
+    "high": ["Great, thank you.", "Got it, appreciate that.",
+             "That's helpful context.", "Good, makes sense.",
+             "Okay, noted.", "Right, thank you."],
+    "medium": ["Okay, thank you.", "Alright.", "Sure, okay.",
+               "Got it.", "Mm, okay.", "Right."],
+    "low": ["Okay.", "Alright, moving on.", "Sure."],
+}
+
+# ── Fallback encouragement phrases ───────────────────────────────────────
+_ENCOURAGEMENT_PHRASES = [
+    "Take your time, I'm listening.",
+    "No rush, whenever you're ready.",
 ]
 
 
-def _next_interview_prompt(session: dict[str, Any]) -> str | None:
-    """Advance interview state and return the next software-themed prompt."""
-    stage = session.get("interview_stage", "intro")
-    idx = int(session.get("interview_question_idx", 0))
+def _compute_blinks_per_min(blink_history: list) -> float:
+    """Compute blinks per minute from AU45 history using peak detection."""
+    if len(blink_history) < 10:
+        return 17.5  # not enough data yet
+    values = [v for _, v in blink_history[-300:]]  # last 30s @ 10Hz
+    threshold = 0.4
+    in_blink = False
+    blink_count = 0
+    for v in values:
+        if v > threshold and not in_blink:
+            blink_count += 1
+            in_blink = True
+        elif v < threshold * 0.5:
+            in_blink = False
+    duration_min = len(values) / 10.0 / 60.0
+    if duration_min < 0.05:
+        return 17.5
+    return round(blink_count / duration_min, 2)
 
-    if stage == "intro":
-        session["interview_stage"] = "questions"
-        if SOFTWARE_INTERVIEW_QUESTIONS:
-            session["interview_question_idx"] = 1
-            return f"Great introduction. First question: {SOFTWARE_INTERVIEW_QUESTIONS[0]}"
-        return "Great introduction."
 
-    if idx < len(SOFTWARE_INTERVIEW_QUESTIONS):
-        session["interview_question_idx"] = idx + 1
-        return f"Next question: {SOFTWARE_INTERVIEW_QUESTIONS[idx]}"
+def _build_question_prompt(session: dict[str, Any], q_index: int) -> str:
+    """Build the spoken prompt for a given question index."""
+    questions = session.get("question_bank", [])
+    if q_index < 0 or q_index >= len(questions):
+        return ""
+    q = questions[q_index]
+    if q_index == 0:
+        return f"Great introduction. First question: {q.get('text', '')}"
+    return f"Next question: {q.get('text', '')}"
 
-    return (
-        "That concludes this software interview set. Nice work. "
-        "If you want, we can start a new round focused on system design."
-    )
+
+def _voice_for_question_type(question_type: str) -> str:
+    """Female for HR/closing questions, male for technical ones."""
+    return "female" if question_type in ("behavioral", "closing", "intro") else "male"
+
+
+def _get_current_voice(session: dict[str, Any]) -> str:
+    """Return the voice assigned to the current question (set at question start)."""
+    return session.get("current_voice", "male")
+
+
+def _get_voice_name(session: dict[str, Any], settings: Any) -> str:
+    """Return the TTS voice name for the current turn."""
+    voice = _get_current_voice(session)
+    if voice == "female":
+        return getattr(settings, "tts_voice_female", "en-US-JennyNeural")
+    return getattr(settings, "tts_voice", "en-US-GuyNeural")
 
 
 def _get_semantic_detector(settings: Any) -> Any:
@@ -99,6 +143,7 @@ async def _speak_session_text(
     text: str,
     send_status_fn: Callable[[Any, str], None],
     started_at: float | None = None,
+    voice: str | None = None,
 ) -> float:
     """Speak text over the TTS track and return first-audio latency in ms."""
     tts_eng = session.get("tts_engine")
@@ -128,7 +173,7 @@ async def _speak_session_text(
 
     for idx, chunk in enumerate(chunks):
         synth_t0 = time.perf_counter()
-        tts_result = await tts_eng.synthesize(chunk)
+        tts_result = await tts_eng.synthesize(chunk, voice=voice)
         if tts_result.audio_pcm is None or len(tts_result.audio_pcm) == 0:
             continue
 
@@ -141,14 +186,101 @@ async def _speak_session_text(
         rms = float(np.sqrt(np.mean(tts_result.audio_pcm.astype(np.float32) ** 2))) / 32768.0
         session["audio_energy"] = rms
 
-    # Keep speaking state active briefly to drive avatar animation while queued audio plays.
     if total_duration_s > 0.0:
         send_status_fn(dc, f"tts: {total_duration_s:.1f}s via {getattr(tts_eng, 'engine_name', 'tts')}")
-        await asyncio.sleep(min(total_duration_s, 2.0))
+        await asyncio.sleep(total_duration_s)
 
     session["speaking"] = False
     session["audio_energy"] = 0.0
     return first_audio_ms
+
+
+async def _coding_debrief_flow(
+    session: dict[str, Any],
+    dc: Any,
+    scoring: dict[str, Any],
+) -> None:
+    """Avatar speaks coding feedback + LLM follow-up, then returns to answering phase."""
+    from ..config import get_settings
+    from ..intelligence.llm import call_llm, resolve_provider_config
+    from ..webrtc.data_channel import send_phase, send_question, send_status
+
+    settings = get_settings()
+    send_status(dc, "coding-debrief: start")
+
+    correctness = scoring.get("correctness") or {}
+    passed = int(correctness.get("passed", 0))
+    total = int(correctness.get("total", 0))
+    complexity = scoring.get("complexity") or {}
+    time_c = complexity.get("time", "unknown")
+    failed = correctness.get("failed_cases") or []
+    is_optimal = bool(complexity.get("is_optimal", True))
+
+    if passed < total:
+        pattern = "some edge cases"
+        if failed and isinstance(failed, list) and failed and isinstance(failed[0], dict):
+            pattern = str(failed[0].get("error") or failed[0].get("actual") or "edge cases")[:120]
+        script = (
+            f"Your solution passes {passed} out of {total} cases. "
+            f"It looks like it struggles with {pattern}. Walk me through your approach."
+        )
+    else:
+        if is_optimal:
+            script = (
+                f"Your solution passes all {total} test cases. "
+                f"Great work — it runs in {time_c}. Walk me through your approach."
+            )
+        else:
+            script = (
+                f"Your solution passes all {total} cases in {time_c}. "
+                "Walk me through your approach and how you might improve it further."
+            )
+
+    voice_name = _get_voice_name(session, settings)
+    session["current_phase"] = "speaking"
+    send_phase(dc, "speaking", 0)
+    await _speak_session_text(session, dc, script, send_status, voice=voice_name)
+
+    follow_up = "What trade-offs did you consider when you chose this approach?"
+    provider = resolve_provider_config(settings)
+    if provider:
+        try:
+            raw = await call_llm(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an interviewer. Ask ONE short follow-up question about the candidate's "
+                            "code or algorithm. Plain text only, one or two sentences max."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Scoring JSON:\n{json.dumps(scoring)[:6000]}",
+                    },
+                ],
+                provider,
+                temperature=0.45,
+                max_tokens=160,
+                timeout_s=20.0,
+            )
+            if raw and not _is_unusable_llm_feedback(raw):
+                follow_up = raw.strip()
+        except Exception as exc:
+            logger.warning("coding follow-up LLM failed: %s", exc)
+
+    session["current_phase"] = "answering"
+    send_phase(dc, "answering", 0)
+    send_question(
+        dc,
+        follow_up,
+        -2,
+        1,
+        "coding_followup",
+        _get_current_voice(session),
+    )
+    await _speak_session_text(session, dc, follow_up, send_status, voice=voice_name)
+    send_status(dc, "coding-debrief: complete")
 
 
 def _build_fallback_feedback(
@@ -206,6 +338,8 @@ except ImportError:
 class OfferRequest(BaseModel):
     sdp: str
     type: str = "offer"
+    job_role: str = "software_engineer"
+    interview_type: str = "quick"
 
 
 class AnswerResponse(BaseModel):
@@ -214,8 +348,12 @@ class AnswerResponse(BaseModel):
     session_id: str
 
 
+from fastapi import Depends as _Depends
+from ..auth import require_user as _require_user
+
+
 @router.post("/offer", response_model=AnswerResponse)
-async def handle_offer(req: OfferRequest):
+async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_require_user)):
     """SDP offer → answer exchange. Sets up the full audio pipeline."""
     if not _AIORTC_AVAILABLE:
         raise HTTPException(503, "WebRTC runtime (aiortc) not available")
@@ -225,12 +363,13 @@ async def handle_offer(req: OfferRequest):
     from ..intelligence.rag import retrieve as rag_retrieve
     from ..intelligence.scoring import InterviewScoringEngine, RunningScorer, UtteranceScores
     from ..perception.stt import transcribe
-    from ..perception.text_quality import classify_quality
+    from ..perception.text_quality import classify_quality, classify_quality_llm
     from ..perception.vocal import analyze as vocal_analyze
     from ..vad.ring_buffer import RingBuffer
     from ..vad.silero import EndOfSpeechDetector
     from ..webrtc.data_channel import (
         send_status, send_transcript, send_scores, send_perception,
+        send_phase, send_question, send_interview_end,
         parse_au_telemetry,
     )
     from ..webrtc.tracks import consume_audio_track
@@ -241,6 +380,34 @@ async def handle_offer(req: OfferRequest):
     pc = RTCPeerConnection()
     ring = RingBuffer(max_seconds=30.0, sample_rate=16_000)
 
+    from ..intelligence.question_bank import generate_question_set
+    from ..intelligence.cv import fetch_and_parse_cv, generate_cv_questions
+
+    # Fetch + parse CV (cached per hash). Non-fatal on failure.
+    cv_profile = await fetch_and_parse_cv(user_id, settings)
+    cv_qs: list[str] = []
+    if not cv_profile.is_empty():
+        target_cv_qs = 3 if req.interview_type == "quick" else 4
+        try:
+            cv_qs = await generate_cv_questions(
+                cv_profile, req.job_role, target_cv_qs, settings,
+            )
+        except Exception as exc:
+            logger.warning("CV question generation failed: %s", exc)
+            cv_qs = []
+
+    question_bank = generate_question_set(
+        job_role=req.job_role,
+        interview_type=req.interview_type,
+        cv=cv_profile if not cv_profile.is_empty() else None,
+        cv_questions=cv_qs or None,
+    )
+    logger.info(
+        "Session %s: %s interview for %s, %d questions (cv=%s, cv_qs=%d)",
+        session_id[:8], req.interview_type, req.job_role, len(question_bank),
+        "yes" if not cv_profile.is_empty() else "no", len(cv_qs),
+    )
+
     session: dict[str, Any] = {
         "id": session_id,
         "pc": pc,
@@ -248,6 +415,8 @@ async def handle_offer(req: OfferRequest):
         "data_channel": None,
         "au_channel": None,
         "latest_au": None,
+        "blink_history": [],
+        "latest_face_emotion": "neutral",
         "audio_task": None,
         "transcribe_tasks": set(),
         "transcribe_lock": asyncio.Lock(),
@@ -268,6 +437,38 @@ async def handle_offer(req: OfferRequest):
         "interview_started": False,
         "latest_partial_transcript": "",
         "latest_transcript_text": "",
+        # Interview config
+        "job_role": req.job_role,
+        "interview_type": req.interview_type,
+        "question_bank": question_bank,
+        "cv_profile": cv_profile,
+        "cv_summary": cv_profile.to_prompt_summary() if not cv_profile.is_empty() else "",
+        "answered_count": 0,
+        "skipped_count": 0,
+        "per_question_scores": [],
+        "current_phase": "idle",
+        "phase_timer_task": None,
+        "silence_timer_task": None,
+        "last_speech_time": None,
+        "interview_complete": False,
+        # Feature 1: Completion detection state
+        "current_answer_transcript": "",
+        "silence_since_last_speech": None,
+        "last_completeness_score": 0.0,
+        "last_completeness_signals": {},
+        "answer_prompted_at": None,
+        "answer_prompted_spoken": False,
+        "current_question_subtype": "unknown",
+        "answer_fallback_task": None,
+        "vad_speaking": False,
+        "last_backchannel_time": 0.0,
+        "current_q_probe_count": 0,
+        "post_transcript_in_flight": False,
+        # Feature 4: Backchannel state
+        "last_backchannel_time": None,
+        "backchannel_active": False,
+        "backchannel_track": None,
+        "backchannel_log": [],
     }
     _sessions[session_id] = session
 
@@ -278,13 +479,442 @@ async def handle_offer(req: OfferRequest):
         session=session,
         fps=settings.avatar_fps,
     )
+
+    # Feature 4: Backchannel audio track
+    from ..synthesis.backchannel import BackchannelTrack, BackchannelManager
+    backchannel_track = BackchannelTrack()
+    session["backchannel_track"] = backchannel_track
+    backchannel_mgr = BackchannelManager(
+        session=session,
+        tts_engine=session.get("tts_engine"),
+        backchannel_track=backchannel_track,
+    )
     session["tts_track"] = tts_track
     session["avatar_track"] = avatar_track
     pc.addTrack(tts_track)
     pc.addTrack(avatar_track)
+    pc.addTrack(backchannel_track)  # Feature 4: backchannel audio
+
+    # ── Interview flow management ──
+
+    async def _start_question_flow(q_index: int) -> None:
+        """Start the speak → answer flow for a question.
+
+        This is the single source of truth for question progression.
+        The flow is strictly sequential and fully awaited:
+          1. Classify question subtype (behavioral/technical/situational)
+          2. Send question text to client (appears on screen)
+          3. Speak the question via TTS (await full playback)
+          4. Answer phase — completeness-based detection via _post_transcript
+
+        _post_transcript triggers completeness evaluation and _check_advance.
+        """
+        dc = session.get("data_channel")
+
+        # Ensure local LLM is in neutral 'none' mode (clear evaluator bias)
+        # Only do this at the very beginning of the interview
+        if q_index == 0:
+            from ..intelligence.llm import resolve_provider_config, swap_adapter
+            provider = resolve_provider_config(settings)
+            if provider and provider.provider == "local":
+                send_status(dc, "initializing neutral interviewer mode...")
+                await swap_adapter("none")
+        questions = session.get("question_bank", [])
+        if q_index >= len(questions) or session.get("interview_complete"):
+            await _end_interview()
+            return
+
+        # Idempotency guard: if we already started this exact question and it's
+        # still in speaking/answering, do not re-enter (prevents duplicate TTS
+        # of the same question when a stray VAD/transition triggers re-entry).
+        started_idx = session.get("question_started_idx")
+        current_phase = session.get("current_phase", "")
+        if (
+            started_idx == q_index
+            and current_phase in ("speaking", "answering")
+            and not session.get("interview_complete")
+        ):
+            logger.info("Skipping duplicate _start_question_flow(%d), phase=%s", q_index, current_phase)
+            return
+        session["question_started_idx"] = q_index
+
+        _cancel_all_timers()
+
+        session["interview_question_idx"] = q_index + 1
+        session["interview_stage"] = "questions"
+        session["current_q_transcripts"] = 0
+
+        # Reset per-question completeness state
+        session["current_answer_transcript"] = ""
+        session["silence_since_last_speech"] = None
+        session["last_completeness_score"] = 0.0
+        session["last_completeness_signals"] = {}
+        session["answer_prompted_spoken"] = False
+        session["current_q_probe_count"] = 0
+        session["fallback_timer_epoch"] = session.get("fallback_timer_epoch", 0) + 1
+        if session.get("backchannel_active"):
+            session["backchannel_active"] = False
+
+        q = questions[q_index]
+        session["current_voice"] = _voice_for_question_type(q.get("type", ""))
+        voice_label = _get_current_voice(session)
+        voice_name = _get_voice_name(session, settings)
+
+        # 1. Classify question subtype
+        try:
+            from ..intelligence.coverage import classify_question_subtype
+            from ..intelligence.llm import resolve_provider_config
+            provider_cfg = resolve_provider_config(settings)
+            subtype = await classify_question_subtype(
+                q.get("text", ""), q.get("type", "role_specific"), provider_cfg,
+            )
+        except Exception:
+            subtype = "behavioral"
+        session["current_question_subtype"] = subtype
+
+        # Set phase=speaking BEFORE any await so the VAD callback can't fire
+        # on_speech_start/end during this window with phase=="answering".
+        session["current_phase"] = "speaking"
+        session["speaking"] = True
+        session["current_question"] = q.get("text", "")
+
+        # 2. Send question text to client so it appears on screen
+        send_question(dc, q.get("text", ""), q_index, len(questions), q.get("type", ""), voice_label)
+        send_phase(dc, "speaking", 0)
+
+        # 3. Speak the question via TTS — await FULL playback
+        spoken = _build_question_prompt(session, q_index)
+        if spoken:
+            await _speak_session_text(session, dc, spoken, send_status, voice=voice_name)
+
+        # 4. Enter ANSWER phase — completeness-based detection
+        session["current_phase"] = "answering"
+        session["last_speech_time"] = time.perf_counter()
+        session["answer_prompted_at"] = time.perf_counter()
+        send_phase(dc, "answering", 0)
+        send_status(dc, "phase: answering")
+
+        # Start fallback timer (encouragement at 12s, auto-skip at 20s)
+        session["answer_fallback_task"] = asyncio.create_task(
+            _answer_fallback_timer(q_index, session["fallback_timer_epoch"])
+        )
+
+    async def _check_advance(q_index: int) -> None:
+        """Check if the answer is complete enough to advance.
+
+        Called reactively after each completeness evaluation.
+        Conditions:
+          - High Score (>= 0.70): Advance after 1.5s silence.
+          - Low Score (< 0.70): Advance after 6.0s silence (auto-finish).
+          - Intro (-1): Advance if score >= 0.40 and 2.5s silence.
+        """
+        if session.get("current_phase") != "answering":
+            return
+        if session.get("interview_complete"):
+            return
+
+        silence_since = session.get("silence_since_last_speech")
+        if silence_since is None:
+            return
+        silence_dur = time.perf_counter() - silence_since
+
+        score = session.get("last_completeness_score", 0.0)
+        
+        # Determine threshold based on phase
+        is_intro = (q_index == -1)
+        target_score = 0.40 if is_intro else 0.70
+        high_score_silence = 2.5 if is_intro else 1.5
+        low_score_silence = 6.0
+        
+        should_force = False
+        if score >= target_score:
+            if silence_dur < high_score_silence:
+                return
+        else:
+            # Low score — only advance if silent for a long time
+            if silence_dur < low_score_silence:
+                return
+            should_force = True
+
+        dc = session.get("data_channel")
+        signals = session.get("last_completeness_signals", {})
+        
+        # Send answer_complete event
+        from .data_channel import send_answer_complete
+        send_answer_complete(dc, score, signals)
+
+        reason = "forced (silence)" if should_force else "complete"
+        send_status(dc, f"answer-advance ({reason}): score={score:.2f}")
+        session["answered_count"] = session.get("answered_count", 0) + 1
+
+        # Cancel fallback timer and bump epoch so stale timers self-exit
+        ft = session.get("answer_fallback_task")
+        if ft and not ft.done():
+            ft.cancel()
+        session["fallback_timer_epoch"] = session.get("fallback_timer_epoch", 0) + 1
+
+        await _transition_to_next(q_index)
+
+    async def _answer_fallback_timer(q_index: int, my_epoch: int = 0) -> None:
+        """Persistent monitor for the answer phase.
+        
+        Controls:
+        - 12s total silence (no speech ever) -> encouragement
+        - 20s total silence (no speech ever) -> skip
+        - 6s silence after speech (regardless of score) -> advance
+        - Prevents interruptions if vad_speaking is True
+        """
+        phase_start = time.perf_counter()
+        encouraged = False
+        
+        while session.get("current_phase") == "answering":
+            await asyncio.sleep(0.5)
+
+            # Epoch guard: if a newer timer has been created (e.g. after a
+            # follow-up reset), this stale instance must exit immediately.
+            if session.get("fallback_timer_epoch", 0) != my_epoch:
+                logger.debug("Fallback timer epoch %d stale (current %d), exiting",
+                             my_epoch, session.get("fallback_timer_epoch", 0))
+                return
+
+            if session.get("interview_complete"):
+                return
+
+            # If _post_transcript is in-flight, do NOT advance.
+            # The pipeline may take 10-20s and will handle advancement itself.
+            if session.get("post_transcript_in_flight"):
+                continue
+
+            # If STT transcription is still running, the user DID speak — don't
+            # treat the processing gap as silence and fire encouragement/skip.
+            if session.get("transcribe_running"):
+                continue
+
+            # If VAD is currently detecting speech, skip checks.
+            # Safety: if EOS detector says no speech but vad_speaking is stuck,
+            # reset it (happens with short noise bursts from TTS echo).
+            if session.get("vad_speaking"):
+                eos = session.get("eos_detector")
+                if eos and not eos.is_speaking:
+                    session["vad_speaking"] = False
+                else:
+                    continue
+
+            last_speech = session.get("last_speech_time")
+            has_spoken = int(session.get("current_q_transcripts", 0)) > 0
+            
+            now = time.perf_counter()
+            total_silence = now - phase_start
+            post_speech_silence = (now - last_speech) if last_speech else total_silence
+
+            # 1. User spoke but then went silent for 6s → force advance
+            #    NOTE: We cannot call _check_advance here because it cancels
+            #    the fallback task (us!), which raises CancelledError and kills
+            #    the transition. Instead, transition directly.
+            if has_spoken and post_speech_silence >= 6.0:
+                dc = session.get("data_channel")
+                score = session.get("last_completeness_score", 0.0)
+                signals = session.get("last_completeness_signals", {})
+                from .data_channel import send_answer_complete
+                send_answer_complete(dc, score, signals)
+                send_status(dc, f"answer-advance (forced-silence-6s): score={score:.2f}")
+                session["answered_count"] = session.get("answered_count", 0) + 1
+                await _transition_to_next(q_index)
+                return
+
+            # 2. Never spoke at all for 12s -> Encourage
+            if not has_spoken and total_silence >= 12.0 and not encouraged:
+                encouraged = True
+                session["answer_prompted_spoken"] = True
+                dc = session.get("data_channel")
+                phrase = random.choice(_ENCOURAGEMENT_PHRASES)
+                voice_name = _get_voice_name(session, settings)
+                send_status(dc, f"encouragement: {phrase}")
+                await _speak_session_text(session, dc, phrase, send_status, voice=voice_name)
+
+            # 3. Never spoke at all for 20s -> Skip
+            if not has_spoken and total_silence >= 20.0:
+                dc = session.get("data_channel")
+                send_status(dc, "silence-timeout: 20s, skipping question")
+                if q_index >= 0:
+                    session["skipped_count"] = session.get("skipped_count", 0) + 1
+                await _transition_to_next(q_index)
+                return
+
+    async def _transition_to_next(current_q_index: int) -> None:
+        """Speak acknowledgment, then advance to the next question."""
+        # Guard: set phase to "transition" immediately (before any await) so that
+        # the fallback timer's while-loop exits and cannot race into a second call.
+        if session.get("current_phase") == "transition":
+            return  # Another transition is already in progress
+        dc = session.get("data_channel")
+        session["current_phase"] = "transition"
+        send_phase(dc, "transition", 0)
+
+        # Cancel fallback timer if still running (but not if WE are the fallback timer)
+        current = asyncio.current_task()
+        ft = session.get("answer_fallback_task")
+        if ft and not ft.done() and ft is not current:
+            ft.cancel()
+
+        # Wait for in-flight post_transcript to finish before transitioning.
+        # Skip if pt_task IS the current task (called from within _post_transcript_inner)
+        # to avoid a self-deadlock where the task waits for itself.
+        pt_task = session.get("post_transcript_task")
+        if pt_task and not pt_task.done() and pt_task is not current:
+            try:
+                await asyncio.wait_for(asyncio.shield(pt_task), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("post_transcript timed out during transition, proceeding")
+            except Exception:
+                pass
+
+        # Reset probe count for the next question
+        session["current_q_probe_count"] = 0
+
+        # Feature 3: Acknowledgment phrase (skip on intro)
+        q_idx = int(session.get("interview_question_idx", 0))
+        if q_idx >= 1:  # Don't ack the intro (idx 0)
+            score = session.get("last_completeness_score", 0.0)
+            if score >= 0.75:
+                tone = "high"
+            elif score >= 0.45:
+                tone = "medium"
+            else:
+                tone = "low"
+            ack_phrase = random.choice(ACKNOWLEDGMENT_PHRASES[tone])
+            voice_name = _get_voice_name(session, settings)
+            send_status(dc, f"ack ({tone}): {ack_phrase}")
+            await _speak_session_text(session, dc, ack_phrase, send_status, voice=voice_name)
+            await asyncio.sleep(0.4)  # 400ms pause after ack
+
+        next_idx = int(session.get("interview_question_idx", 0))
+        questions = session.get("question_bank", [])
+        if next_idx < len(questions):
+            await _start_question_flow(next_idx)
+        else:
+            await _end_interview()
+
+    def _cancel_all_timers() -> None:
+        """Cancel all running timer/monitor tasks (except the caller)."""
+        current = asyncio.current_task()
+        for key in ("phase_timer_task", "silence_timer_task", "answer_monitor_task", "answer_fallback_task"):
+            old = session.get(key)
+            if old and not old.done() and old is not current:
+                old.cancel()
+
+    async def _end_interview() -> None:
+        """Finalize the interview and notify the client."""
+        if session.get("interview_complete"):
+            return
+        session["interview_complete"] = True
+        session["current_phase"] = "complete"
+        _cancel_all_timers()
+        dc = session.get("data_channel")
+
+        questions = session.get("question_bank", [])
+        answered = session.get("answered_count", 0)
+        skipped = session.get("skipped_count", 0)
+
+        # Aggregate raw per-utterance records into one score per question index.
+        raw_per_q: list[dict] = session.get("per_question_scores", [])
+        buckets: dict[int, list[dict]] = {}
+        for rec in raw_per_q:
+            idx = rec["index"]
+            buckets.setdefault(idx, []).append(rec)
+        per_q_summary = []
+        for idx in sorted(buckets):
+            recs = buckets[idx]
+            n = len(recs)
+            per_q_summary.append({
+                "index": idx,
+                "question": recs[0]["question"],
+                "score": round(sum(r["score"] for r in recs) / n, 1),
+                "content": round(sum(r["content"] for r in recs) / n, 1),
+                "delivery": round(sum(r["delivery"] for r in recs) / n, 1),
+                "composure": round(sum(r["composure"] for r in recs) / n, 1),
+                "skipped": recs[0].get("skipped", False),
+            })
+        avg_total = (
+            round(sum(q["score"] for q in per_q_summary) / len(per_q_summary), 1)
+            if per_q_summary else 0.0
+        )
+        send_interview_end(dc, len(questions), answered, skipped, per_q_summary, avg_total)
+        send_phase(dc, "complete", 0)
+
+        closing = (
+            "That concludes your interview. Great job staying focused. "
+            "Your scores and detailed feedback will be available on the summary page."
+        )
+        voice_name = _get_voice_name(session, settings)
+        await _speak_session_text(session, dc, closing, send_status, voice=voice_name)
+        send_status(dc, f"interview-complete: {answered} answered, {skipped} skipped out of {len(questions)}")
 
     async def _post_transcript(result, audio_chunk):
-        """Run scoring, perception, RAG, and optional LLM after a successful transcript."""
+        """Run scoring, perception, and completeness evaluation for a transcript.
+
+        Triggers _check_advance() after completeness evaluation.
+        """
+        # Phase guard: only process transcripts during answering phase
+        current_phase = session.get("current_phase", "")
+        if current_phase not in ("answering", "intro"):
+            logger.debug("Ignoring transcript in phase %s", current_phase)
+            return
+
+        # NEW: Noise filter. Ignore very short transcripts (TTS echo, noise bursts)
+        # to stop ghost VAD triggers and unnecessary LLM latency.
+        transcript_text = (result.text or "").strip()
+        word_count = len(transcript_text.split())
+        if word_count < 4 and current_phase != "intro":
+            logger.info("Ignoring noisy transcript (%d words): '%s'", word_count, transcript_text)
+            return
+
+        # Guard: if another pipeline is already in-flight, just accumulate the
+        # transcript text and bail.  The running pipeline reads the accumulated
+        # current_answer_transcript, so the LLM will still see the full answer.
+        # This prevents concurrent pipelines from generating duplicate follow-ups
+        # (and double-incrementing the probe counter).
+        if session.get("post_transcript_in_flight"):
+            session["current_answer_transcript"] = (
+                session.get("current_answer_transcript", "") + " " + transcript_text
+            ).strip()
+            session["current_q_transcripts"] = int(session.get("current_q_transcripts", 0)) + 1
+            session["last_speech_time"] = time.perf_counter()
+            session["silence_since_last_speech"] = time.perf_counter()
+            logger.info(
+                "Pipeline in-flight, accumulated transcript (%d segments): '%s'",
+                session.get("current_q_transcripts", 0),
+                transcript_text[:60],
+            )
+            return
+
+        # Guard: prevent fallback timer from advancing while this pipeline runs
+        session["post_transcript_in_flight"] = True
+        try:
+            await _post_transcript_inner(result, audio_chunk)
+        finally:
+            session["post_transcript_in_flight"] = False
+
+    async def _post_transcript_inner(result, audio_chunk):
+        """Inner implementation of post_transcript (wrapped by in-flight guard)."""
+        session["current_q_transcripts"] = int(session.get("current_q_transcripts", 0)) + 1
+
+        # Accumulate transcript for completeness analysis
+        session["current_answer_transcript"] = (
+            session.get("current_answer_transcript", "") + " " + result.text
+        ).strip()
+
+        # Restart fallback timer loop (if not already running)
+        # However, _answer_fallback_timer is now a persistent while loop started in _start_question_flow.
+        # So we don't need to restart it here.
+        # But we DO need to ensure it wasn't cancelled.
+        ft = session.get("answer_fallback_task")
+        if ft is None or ft.done():
+            q_idx = max(-1, int(session.get("interview_question_idx", 1)) - 1)
+            session["answer_fallback_task"] = asyncio.create_task(
+                _answer_fallback_timer(q_idx)
+            )
+
         dc = session.get("data_channel")
         loop = asyncio.get_running_loop()
         dur_s = len(audio_chunk) / 16_000
@@ -293,13 +923,20 @@ async def handle_offer(req: OfferRequest):
         try:
             # 1-2-6. Run TQ + Vocal + RAG in parallel
             t_percept = time.perf_counter()
-            tq_fut = loop.run_in_executor(
-                None,
-                classify_quality,
-                result.text,
-                getattr(registry, "bert_model", None),
-                getattr(registry, "bert_tokenizer", None),
-            )
+            tq_backend = getattr(settings, "text_quality_backend", "llm").strip().lower()
+            if tq_backend == "llm":
+                tq_fut = classify_quality_llm(result.text, settings)
+            elif tq_backend == "heuristic":
+                from ..perception.text_quality import _heuristic_quality
+                tq_fut = loop.run_in_executor(None, _heuristic_quality, result.text)
+            else:
+                tq_fut = loop.run_in_executor(
+                    None,
+                    classify_quality,
+                    result.text,
+                    getattr(registry, "bert_model", None),
+                    getattr(registry, "bert_tokenizer", None),
+                )
             vocal_fut = loop.run_in_executor(
                 None,
                 vocal_analyze,
@@ -319,10 +956,13 @@ async def handle_offer(req: OfferRequest):
             # 3. AU telemetry snapshot
             au = session.get("latest_au")
             eye_contact = au.eye_contact if au else 0.5
-            blinks_per_min = 17.5  # default (real blink tracking needs Phase 5)
-            # Map vocal emotion to positivity
+            blinks_per_min = _compute_blinks_per_min(session.get("blink_history", []))
+            # Map vocal + face emotion to positivity (50/50 blend)
             positive_emotions = {"confident", "composed", "engaged", "happy", "positive"}
-            emotion_positivity = 0.7 if vocal_result.dominant_emotion in positive_emotions else 0.3
+            vocal_positive = vocal_result.dominant_emotion in positive_emotions
+            face_emotion = session.get("latest_face_emotion", "neutral")
+            face_positive = face_emotion in positive_emotions
+            emotion_positivity = ((0.7 if vocal_positive else 0.3) + (0.7 if face_positive else 0.3)) / 2.0
 
             # 4. Compute scores (master interview scoring engine)
             interview_scorer: InterviewScoringEngine = session.get("interview_scorer")
@@ -367,7 +1007,7 @@ async def handle_offer(req: OfferRequest):
             # 5. Send perception
             send_perception(dc, {
                 "vocal_emotion": vocal_result.dominant_emotion,
-                "face_emotion": "neutral",  # face model not yet available
+                "face_emotion": session.get("latest_face_emotion", "neutral"),
                 "text_quality_label": tq_result.label,
                 "text_quality_score": tq_result.base_score,
                 "acoustic_confidence": vocal_result.acoustic_confidence,
@@ -381,137 +1021,196 @@ async def handle_offer(req: OfferRequest):
             if rubric_context:
                 send_status(dc, f"rag: {len(rag_result.passages)} passages in {rag_ms:.0f}ms")
 
-            # 7. Optional LLM feedback (Groq or Airforce) → TTS → Avatar
+            # 7. Record per-question score
+            q_idx = max(0, int(session.get("interview_question_idx", 1)) - 1)
+            questions = session.get("question_bank", [])
+            q_record = {
+                "index": q_idx,
+                "question": session.get("current_question", ""),
+                "score": latest_scores.final,
+                "content": latest_scores.content,
+                "delivery": latest_scores.delivery,
+                "composure": latest_scores.composure,
+                "skipped": False,
+            }
+            per_q = session.get("per_question_scores", [])
+            per_q.append(q_record)
+            session["per_question_scores"] = per_q
+
+            session["last_speech_time"] = time.perf_counter()
+
+            # 8. Optional LLM feedback (Groq or Airforce)
             llm_ttft_ms = 0.0
             classifier_ms = 0.0
             generator_ms = 0.0
-            tts_first_ms = 0.0
             word_count = len(result.text.split())
             send_status(dc, f"interview: answer received ({word_count} words)")
 
-            next_prompt = _next_interview_prompt(session)
-            if next_prompt:
-                from ..intelligence import interviewer as interviewer_intel
+            from ..intelligence import interviewer as interviewer_intel
 
-                current_question = str(session.get("current_question") or INTRO_QUESTION)
-                interviewer_state = session.get("interviewer_state")
-                conversation_history = session.get("interviewer_history") or []
-                previous_modes = (interviewer_state or {}).get("last_modes", [])
-                previous_mode = previous_modes[-1] if previous_modes else ""
-                monologue_flag = bool(
-                    word_count >= max(10, int(getattr(settings, "interview_interrupt_word_limit", 250)))
-                )
+            current_question = str(session.get("current_question") or INTRO_QUESTION)
+            interviewer_state = session.get("interviewer_state")
+            conversation_history = session.get("interviewer_history") or []
+            previous_modes = (interviewer_state or {}).get("last_modes", [])
+            previous_mode = previous_modes[-1] if previous_modes else ""
+            monologue_flag = bool(
+                word_count >= max(10, int(getattr(settings, "interview_interrupt_word_limit", 250)))
+            )
+            next_q_idx = int(session.get("interview_question_idx", 0))
+            next_prompt_text = ""
+            if next_q_idx < len(questions):
+                next_prompt_text = questions[next_q_idx].get("text", "")
 
-                stream_state = {
-                    "first_audio_ms": 0.0,
-                    "total_duration_s": 0.0,
-                    "chunks": 0,
-                }
+            # Pass the full accumulated answer so the LLM sees everything the
+            # user has said for this question, not just the latest segment.
+            full_answer_so_far = session.get("current_answer_transcript") or result.text
+            turn_result = await interviewer_intel.generate_interviewer_turn(
+                transcript=full_answer_so_far,
+                current_question=current_question,
+                ideal_answer_rubric=rubric_context,
+                rag_passages=list(rag_result.passages or []),
+                rag_distances=list(rag_result.distances or []),
+                vocal_confidence=float(vocal_result.acoustic_confidence),
+                text_quality_score=float(tq_result.base_score),
+                text_quality_label=str(tq_result.label),
+                conversation_history=conversation_history,
+                previous_mode=previous_mode,
+                session_state=interviewer_state,
+                monologue_flag=monologue_flag,
+                next_question=next_prompt_text or "Thank you for your answer.",
+                settings=settings,
+                cv_summary=session.get("cv_summary", ""),
+            )
 
-                async def _on_generator_sentence_chunk(sentence: str) -> None:
-                    tts_eng = session.get("tts_engine")
-                    tts_track = session.get("tts_track")
-                    if tts_eng is None or tts_track is None:
-                        return
+            session["interviewer_state"] = turn_result.get("state")
+            session["interviewer_history"] = turn_result.get("history", conversation_history)
+            llm_ttft_ms = float(turn_result.get("llm_ttft_ms", 0.0))
+            classifier_ms = float(turn_result.get("classifier_ms", 0.0))
+            generator_ms = float(turn_result.get("generator_ms", 0.0))
 
-                    from ..synthesis.tts import split_text_for_tts_streaming
+            mode = str(turn_result.get("mode") or "PROBE_GAP")
+            spoken = str(turn_result.get("spoken_response") or "")
 
-                    max_chars = max(60, int(getattr(settings, "tts_chunk_max_chars", 150)))
-                    chunks = split_text_for_tts_streaming(sentence, max_chars=max_chars)
-                    if not chunks:
-                        return
+            # Track probes per question — cap at 2, then force ADVANCE
+            probe_count = session.get("current_q_probe_count", 0)
+            PROBE_MODES = {"PROBE_DEPTH", "PROBE_GAP", "CHALLENGE", "REDIRECT", "RESCUE", "CONFRONT", "REFRAME"}
+            if mode in PROBE_MODES:
+                probe_count += 1
+                session["current_q_probe_count"] = probe_count
+                if probe_count > 2:
+                    mode = "ADVANCE"
+                    spoken = ""  # Let the normal transition handle speech
+                    logger.info("Probe cap reached (%d), forcing ADVANCE", probe_count)
 
-                    session["speaking"] = True
-                    for chunk in chunks:
-                        tts_result = await tts_eng.synthesize(chunk)
-                        if tts_result.audio_pcm is None or len(tts_result.audio_pcm) == 0:
-                            continue
-                        tts_track.enqueue_audio(tts_result.audio_pcm, tts_result.sample_rate)
-                        stream_state["chunks"] += 1
-                        stream_state["total_duration_s"] += float(tts_result.duration_s)
-                        if stream_state["first_audio_ms"] <= 0.0:
-                            stream_state["first_audio_ms"] = (
-                                (time.perf_counter() - t_pipeline_start) * 1000.0
-                            )
-                        rms = float(np.sqrt(np.mean(tts_result.audio_pcm.astype(np.float32) ** 2))) / 32768.0
-                        session["audio_energy"] = rms
+            if spoken and not _is_unusable_llm_feedback(spoken):
+                from ..webrtc.data_channel import send_event
+                send_event(dc, "interviewer_feedback", {"text": spoken, "mode": mode})
 
-                turn_result = await interviewer_intel.generate_interviewer_turn(
-                    transcript=result.text,
-                    current_question=current_question,
-                    ideal_answer_rubric=rubric_context,
-                    rag_passages=list(rag_result.passages or []),
-                    rag_distances=list(rag_result.distances or []),
-                    vocal_confidence=float(vocal_result.acoustic_confidence),
-                    text_quality_score=float(tq_result.base_score),
-                    text_quality_label=str(tq_result.label),
-                    conversation_history=conversation_history,
-                    previous_mode=previous_mode,
-                    session_state=interviewer_state,
-                    monologue_flag=monologue_flag,
-                    next_question=next_prompt,
-                    settings=settings,
-                    on_generator_sentence_chunk=_on_generator_sentence_chunk,
-                )
+                # ── Phase 2: Speak the follow-up via TTS ──
+                if mode != "ADVANCE":
+                    # Set phase to "speaking" so new transcripts are rejected
+                    # by the phase guard in _post_transcript while follow-up plays.
+                    session["current_phase"] = "speaking"
+                    send_phase(dc, "speaking", 0)
+                    voice_name = _get_voice_name(session, settings)
+                    send_status(dc, f"speaking follow-up ({mode})")
+                    await _speak_session_text(session, dc, spoken, send_status, voice=voice_name)
+                    # Update current_question to the probe text so the next answer
+                    # is evaluated in the context of this follow-up, not the original Q.
+                    session["current_question"] = spoken
 
-                session["interviewer_state"] = turn_result.get("state")
-                session["interviewer_history"] = turn_result.get("history", conversation_history)
-                llm_ttft_ms = float(turn_result.get("llm_ttft_ms", 0.0))
-                classifier_ms = float(turn_result.get("classifier_ms", 0.0))
-                generator_ms = float(turn_result.get("generator_ms", 0.0))
+            send_status(dc, f"interview-mode: {mode}")
+            send_status(
+                dc,
+                (
+                    "interviewer-latency: "
+                    f"classifier={classifier_ms:.0f}ms "
+                    f"generator={generator_ms:.0f}ms "
+                    f"ttft={llm_ttft_ms:.0f}ms"
+                ),
+            )
 
-                interviewer_text = str(turn_result.get("spoken_response") or next_prompt)
-                mode = str(turn_result.get("mode") or "PROBE_GAP")
-                evidence = str(turn_result.get("evidence") or "")
-                streamed_chunk_count = int(turn_result.get("streamed_chunk_count", 0))
-                send_status(dc, f"interview-mode: {mode}")
-                send_status(
-                    dc,
-                    (
-                        "interviewer-latency: "
-                        f"classifier={classifier_ms:.0f}ms "
-                        f"generator={generator_ms:.0f}ms "
-                        f"ttft={llm_ttft_ms:.0f}ms"
-                    ),
-                )
-                if evidence:
-                    send_status(dc, f"interview-evidence: {evidence[:140]}")
-
-                send_status(dc, f"question: {interviewer_text[:180]}")
-                if streamed_chunk_count > 0 and stream_state["chunks"] > 0:
-                    tts_first_ms = float(stream_state["first_audio_ms"])
-                    send_status(
-                        dc,
-                        (
-                            "tts-streamed: "
-                            f"chunks={stream_state['chunks']} "
-                            f"duration={stream_state['total_duration_s']:.1f}s"
-                        ),
-                    )
-                    if stream_state["total_duration_s"] > 0.0:
-                        await asyncio.sleep(min(float(stream_state["total_duration_s"]), 2.0))
-                    session["speaking"] = False
-                    session["audio_energy"] = 0.0
-                else:
-                    tts_first_ms = await _speak_session_text(
-                        session,
-                        dc,
-                        interviewer_text,
-                        send_status,
-                        t_pipeline_start,
-                    )
-                session["current_question"] = next_prompt
-
-            # 8. Latency summary
+            # 9. Latency summary (advancement is handled by completeness evaluation)
             total_ms = (time.perf_counter() - t_pipeline_start) * 1000.0
             latency_report = (
                 f"latency: percept={percept_ms:.0f}ms(tq={tq_ms:.0f}+vocal={vocal_ms:.0f}+rag={rag_ms:.0f}) "
                 f"interviewer=cls:{classifier_ms:.0f}ms+gen:{generator_ms:.0f}ms "
                 f"llm_ttft={llm_ttft_ms:.0f}ms "
-                f"tts_first={tts_first_ms:.0f}ms total={total_ms:.0f}ms"
+                f"total={total_ms:.0f}ms"
             )
             logger.info("Pipeline %s", latency_report)
             send_status(dc, latency_report)
+
+            # Feature 1: Completeness evaluation + mode-based advancement
+            if mode == "ADVANCE":
+                # Normal advancement path — completeness check decides when to move on
+                try:
+                    from ..intelligence.completeness import evaluate_completeness
+                    from ..intelligence.llm import resolve_provider_config
+
+                    full_transcript = session.get("current_answer_transcript", "")
+                    question_text = session.get("current_question", "")
+                    question_subtype = session.get("current_question_subtype", "unknown")
+                    audio_tail = session.get("_last_audio_tail", audio_chunk)
+                    provider_cfg = resolve_provider_config(settings)
+
+                    completeness = await evaluate_completeness(
+                        full_transcript=full_transcript,
+                        question_text=question_text,
+                        question_subtype=question_subtype,
+                        audio_tail=audio_tail,
+                        sample_rate=16_000,
+                        provider_config=provider_cfg,
+                    )
+
+                    session["last_completeness_score"] = completeness.score
+                    session["last_completeness_signals"] = {
+                        "semantic": completeness.semantic,
+                        "prosodic": completeness.prosodic,
+                        "coverage": completeness.coverage,
+                    }
+
+                    # Check if we should advance
+                    q_idx = max(-1, int(session.get("interview_question_idx", 1)) - 1)
+                    await _check_advance(q_idx)
+
+                except Exception as comp_exc:
+                    logger.warning("Completeness evaluation failed: %s", comp_exc)
+            else:
+                # Non-ADVANCE mode (follow-up spoken) — reset completeness state
+                # so the user can re-answer and the fallback timer doesn't
+                # immediately force-advance past the follow-up.
+
+                # STEP 1: Kill the old fallback timer FIRST (before changing phase)
+                # to close the race window where the old timer sees phase=answering
+                # with a stale phase_start and fires _transition_to_next.
+                ft = session.get("answer_fallback_task")
+                current = asyncio.current_task()
+                if ft and not ft.done() and ft is not current:
+                    ft.cancel()
+
+                # STEP 2: Bump the timer epoch so any stale timer iteration that
+                # slips past the cancel() harmlessly exits on its next loop check.
+                new_epoch = session.get("fallback_timer_epoch", 0) + 1
+                session["fallback_timer_epoch"] = new_epoch
+
+                # STEP 3: Now safe to reset answer state and set phase to answering.
+                session["current_phase"] = "answering"
+                send_phase(dc, "answering", 0)
+                session["current_q_transcripts"] = 0
+                session["current_answer_transcript"] = ""
+                session["last_completeness_score"] = 0.0
+                session["last_completeness_signals"] = {}
+                session["silence_since_last_speech"] = None
+                session["last_speech_time"] = time.perf_counter()
+                session["post_transcript_in_flight"] = False
+
+                # STEP 4: Start fresh fallback timer with the new epoch.
+                q_idx = max(-1, int(session.get("interview_question_idx", 1)) - 1)
+                session["answer_fallback_task"] = asyncio.create_task(
+                    _answer_fallback_timer(q_idx, new_epoch)
+                )
+                send_status(dc, f"awaiting re-answer after {mode} follow-up")
 
         except Exception as exc:
                 logger.exception("Post-transcript pipeline failed: %s", exc)
@@ -590,7 +1289,8 @@ async def handle_offer(req: OfferRequest):
                     )
                     send_status(dc, f"transcript: {result.text[:60]}")
                     # Fire scoring + perception + RAG + LLM pipeline
-                    asyncio.create_task(_post_transcript(result, current_chunk))
+                    pt_task = asyncio.create_task(_post_transcript(result, current_chunk))
+                    session["post_transcript_task"] = pt_task
                 elif result.inference_ms == 0:
                     logger.warning("Transcription returned empty (model may not be loaded)")
                     send_status(dc, "stt-empty: model may not be loaded")
@@ -613,10 +1313,35 @@ async def handle_offer(req: OfferRequest):
                 session["transcribe_tasks"].add(task)
                 task.add_done_callback(lambda t: session["transcribe_tasks"].discard(t))
 
+    def on_speech_start():
+        # Drop any VAD activation while TTS is playing (speaker bleed-through).
+        if session.get("speaking") or session.get("current_phase") == "speaking":
+            return
+        # Only track during answering phase to avoid TTS echo issues
+        if session.get("current_phase") == "answering":
+            logger.info("on_speech_start fired")
+            session["vad_speaking"] = True
+
     def on_speech_end(audio_chunk):
+        # Don't process audio captured while TTS is playing (echo rejection).
+        # The VAD may trigger on speaker bleed-through — discard it.
+        if session.get("speaking"):
+            logger.debug("Ignoring speech_end during TTS playback (echo)")
+            return
+
         chunk = audio_chunk.copy()
         dur_s = len(chunk) / 16_000
         logger.info("on_speech_end fired: %.2fs audio", dur_s)
+        session["vad_speaking"] = False
+        session["last_speech_time"] = time.perf_counter()
+        session["silence_since_last_speech"] = time.perf_counter()
+
+        # Feature 4: Notify backchannel manager
+        backchannel_mgr.on_speech_end()
+
+        # Store audio tail for prosodic analysis
+        session["_last_audio_tail"] = chunk
+
         dc = session.get("data_channel")
         send_status(dc, f"speech-end detected ({dur_s:.1f}s)")
         if session.get("transcribe_running"):
@@ -633,6 +1358,7 @@ async def handle_offer(req: OfferRequest):
         silence_ms=settings.vad_silence_ms,
         min_speech_s=settings.vad_min_speech_s,
         silero_session=registry.silero_vad,
+        on_speech_start=on_speech_start,
         on_speech_end=on_speech_end,
         semantic_turn_detector=_get_semantic_detector(settings),
         partial_transcript_provider=lambda: (
@@ -641,6 +1367,40 @@ async def handle_offer(req: OfferRequest):
             or ""
         ),
     )
+    session["eos_detector"] = eos_detector
+
+    async def _consume_video_track(track: Any) -> None:
+        """Sample video frames at 2 FPS and run face emotion classification."""
+        from ..perception import face as face_module
+        last_sample = 0.0
+        SAMPLE_INTERVAL = 0.5  # 2 FPS is enough for emotion tracking
+        while True:
+            try:
+                frame = await asyncio.wait_for(track.recv(), timeout=2.0)
+            except asyncio.TimeoutError:
+                continue
+            except Exception:
+                break
+            now = time.perf_counter()
+            if now - last_sample < SAMPLE_INTERVAL:
+                continue
+            last_sample = now
+            face_model = getattr(registry, "face_model", None)
+            if face_model is None:
+                continue
+            try:
+                img = frame.to_ndarray(format="rgb24")
+                h, w = img.shape[:2]
+                size = min(h, w)
+                y0, x0 = (h - size) // 2, (w - size) // 2
+                crop = img[y0:y0 + size, x0:x0 + size]
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None, face_module.classify, crop, face_model
+                )
+                session["latest_face_emotion"] = result.dominant_emotion
+            except Exception as exc:
+                logger.debug("Face emotion sampling error: %s", exc)
 
     @pc.on("track")
     async def on_track(track):
@@ -653,6 +1413,10 @@ async def handle_offer(req: OfferRequest):
                     eos_detector,
                     session,
                 )
+            )
+        elif track.kind == "video":
+            session["video_task"] = asyncio.create_task(
+                _consume_video_track(track)
             )
 
     @pc.on("datachannel")
@@ -669,8 +1433,35 @@ async def handle_offer(req: OfferRequest):
 
             if not session.get("interview_started", False):
                 session["interview_started"] = True
-                send_status(channel, f"question: {INTRO_QUESTION}")
-                asyncio.create_task(_speak_session_text(session, channel, INTRO_QUESTION, send_status))
+                questions = session.get("question_bank", [])
+                send_status(channel, f"interview-config: {session.get('job_role')} {session.get('interview_type')} ({len(questions)} questions)")
+                session["current_voice"] = "female"  # Intro is an HR/behavioral question
+                voice_name = _get_voice_name(session, settings)
+
+                send_question(channel, INTRO_QUESTION, -1, len(questions), "intro", _get_current_voice(session))
+
+                async def _begin_interview():
+                    # Speak the intro question — await full playback
+                    session["current_phase"] = "speaking"
+                    send_phase(channel, "speaking", 0)
+                    await _speak_session_text(session, channel, INTRO_QUESTION, send_status, voice=voice_name)
+
+                    # After TTS finishes, start answering for the intro
+                    session["interview_stage"] = "intro"
+                    session["interview_question_idx"] = 0
+                    session["current_question"] = INTRO_QUESTION
+                    session["current_q_transcripts"] = 0
+                    session["current_phase"] = "answering"
+                    session["last_speech_time"] = time.perf_counter()
+                    send_phase(channel, "answering", 0)
+                    send_status(channel, "phase: answering (unlimited) — introduce yourself")
+
+                    # Monitor handles advancement after answer/silence
+                    session["answer_fallback_task"] = asyncio.create_task(
+                        _answer_fallback_timer(-1)
+                    )
+
+                asyncio.create_task(_begin_interview())
 
             @channel.on("message")
             def on_message(message):
@@ -679,10 +1470,21 @@ async def handle_offer(req: OfferRequest):
                         import json
 
                         payload = json.loads(message)
-                        if isinstance(payload, dict) and payload.get("type") == "partial_transcript":
-                            text = payload.get("text", "")
-                            if isinstance(text, str):
-                                session["latest_partial_transcript"] = text
+                        if isinstance(payload, dict):
+                            msg_type = payload.get("type", "")
+                            if msg_type == "partial_transcript":
+                                text = payload.get("text", "")
+                                if isinstance(text, str):
+                                    session["latest_partial_transcript"] = text
+                            elif msg_type == "skip_phase":
+                                # Skip phase no longer used — interview flows naturally
+                                pass
+                            elif msg_type == "coding_debrief_request":
+                                raw_scoring = payload.get("scoring_json") or payload.get("scoring")
+                                if isinstance(raw_scoring, dict):
+                                    asyncio.create_task(
+                                        _coding_debrief_flow(session, channel, raw_scoring)
+                                    )
                     except Exception:
                         pass
                 logger.debug("DataChannel message: %s", str(message)[:100])
@@ -697,6 +1499,10 @@ async def handle_offer(req: OfferRequest):
                     au = parse_au_telemetry(message)
                     if au is not None:
                         session["latest_au"] = au
+                        bh = session["blink_history"]
+                        bh.append((au.timestamp, au.au45))
+                        if len(bh) > 600:  # keep last 60s @ 10Hz
+                            session["blink_history"] = bh[-600:]
 
     @pc.on("connectionstatechange")
     async def on_state_change():

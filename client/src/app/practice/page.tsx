@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState, useEffect } from "react";
+import { type User } from "@supabase/supabase-js";
 import AppShell from "@/components/AppShell";
 import { Badge, GlassCard, ProgressRow } from "@/components/ui";
 import { getQuestionsForTopic } from "@/lib/mcq-bank";
@@ -15,6 +16,9 @@ import {
   type MCQAttemptRecord,
   type MCQTopicProgress,
 } from "@/lib/mcq-progress-store";
+import { getNoteForTopic } from "@/lib/notes";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const QUESTIONS_PER_RUN = 4;
 const MIXED_TOPIC_ID = "__mixed__";
@@ -35,6 +39,13 @@ function getFeedback(score: number) {
 
 type QuizState = "topic-selection" | "running" | "completed";
 
+type Note = {
+  id: string;
+  topic: string;
+  notes_markdown: string;
+  updated_at: string;
+};
+
 type CatalogTopic = {
   id: string;
   title: string;
@@ -47,6 +58,8 @@ type CatalogSubtopic = {
 };
 
 export default function PracticePage() {
+  const supabase = getSupabaseClient();
+  const [mode, setMode] = useState<"quiz" | "notes">("quiz");
   const [quizState, setQuizState] = useState<QuizState>("topic-selection");
   const [activeTopicId, setActiveTopicId] = useState<string>("technical");
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -67,13 +80,22 @@ export default function PracticePage() {
   const [quizConfigNotice, setQuizConfigNotice] = useState<string>("");
   const [liveQuestions, setLiveQuestions] = useState<QuizQuestion[]>([]);
 
+  // Notes state
+  const [user, setUser] = useState<User | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [loadingNotes, setLoadingNotes] = useState<Record<string, boolean>>({});
+  const [selectedNoteTopic, setSelectedNoteTopic] = useState<string | null>(null);
+
+  const [shuffleSeed, setShuffleSeed] = useState(0);
+
   const questions = useMemo(() => {
     if (liveQuestions.length > 0) {
       return liveQuestions;
     }
 
     const all = getQuestionsForTopic(activeTopicId);
-    return all.slice(0, QUESTIONS_PER_RUN).map((question) => ({
+    const shuffled = [...all].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, QUESTIONS_PER_RUN).map((question) => ({
       id: question.id,
       prompt: question.prompt,
       options: question.options,
@@ -82,7 +104,8 @@ export default function PracticePage() {
       subtopic: question.topicId,
       difficulty: "medium" as const,
     }));
-  }, [activeTopicId, liveQuestions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTopicId, liveQuestions, shuffleSeed]);
 
   const currentQuestion = questions[currentIndex];
   const selectedOptionId = currentQuestion ? answers[currentQuestion.id] : undefined;
@@ -101,34 +124,40 @@ export default function PracticePage() {
   useEffect(() => {
     let cancelled = false;
     async function loadData() {
-      const [progress, attempts] = await Promise.all([listMcqTopicProgress(), listRecentMcqAttempts(5)]);
+      if (!supabase) return;
+      const [progress, attempts, { data: authData }] = await Promise.all([
+        listMcqTopicProgress(),
+        listRecentMcqAttempts(5),
+        supabase.auth.getUser(),
+      ]);
+
+      if (cancelled) return;
+
+      setUser(authData.user);
 
       let catalog: Array<{ id: string; title: string; subtopicCount: number; defaultQuestions: number }> = [];
       let loadedSubtopics: CatalogSubtopic[] = [];
-      const client = getSupabaseClient();
-      if (client) {
-        const topicsTable = client.from("mcq_topics" as any) as any;
-        const subtopicsTable = client.from("mcq_subtopics" as any) as any;
-        const [{ data: topics }, { data: subtopics }] = await Promise.all([
-          topicsTable.select("id,title,default_questions").eq("is_active", true).order("title", { ascending: true }),
-          subtopicsTable.select("topic_id,title").eq("is_active", true),
-        ]);
+      const topicsTable = supabase.from("mcq_topics" as any) as any;
+      const subtopicsTable = supabase.from("mcq_subtopics" as any) as any;
+      const [{ data: topics }, { data: subtopics }] = await Promise.all([
+        topicsTable.select("id,title,default_questions").eq("is_active", true).order("title", { ascending: true }),
+        subtopicsTable.select("topic_id,title").eq("is_active", true),
+      ]);
 
-        const topicRows = (topics ?? []) as CatalogTopic[];
-        const subtopicRows = (subtopics ?? []) as CatalogSubtopic[];
-        loadedSubtopics = subtopicRows;
-        const counts = new Map<string, number>();
-        for (const row of subtopicRows) {
-          counts.set(row.topic_id, (counts.get(row.topic_id) ?? 0) + 1);
-        }
-
-        catalog = topicRows.map((topic) => ({
-          id: topic.id,
-          title: topic.title,
-          subtopicCount: counts.get(topic.id) ?? 0,
-          defaultQuestions: topic.default_questions ?? 1000,
-        }));
+      const topicRows = (topics ?? []) as CatalogTopic[];
+      const subtopicRows = (subtopics ?? []) as CatalogSubtopic[];
+      loadedSubtopics = subtopicRows;
+      const counts = new Map<string, number>();
+      for (const row of subtopicRows) {
+        counts.set(row.topic_id, (counts.get(row.topic_id) ?? 0) + 1);
       }
+
+      catalog = topicRows.map((topic) => ({
+        id: topic.id,
+        title: topic.title,
+        subtopicCount: counts.get(topic.id) ?? 0,
+        defaultQuestions: topic.default_questions ?? 1000,
+      }));
 
       if (!cancelled) {
         setTopicProgress(progress);
@@ -141,7 +170,15 @@ export default function PracticePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [supabase]);
+
+  const handleSelectNoteTopic = (topic: string) => {
+    const note = getNoteForTopic(topic);
+    if (note) {
+      setNotes((prev) => ({ ...prev, [topic]: note }));
+    }
+    setSelectedNoteTopic(topic);
+  };
 
   function startTopicQuiz(topicId: string) {
     setActiveTopicId(topicId);
@@ -149,6 +186,7 @@ export default function PracticePage() {
     setCurrentIndex(0);
     setLastAttempt(null);
     setLiveQuestions([]);
+    setShuffleSeed((prev) => prev + 1);
     setStartedAt(new Date().toISOString());
     setQuizState("running");
   }
@@ -207,6 +245,8 @@ export default function PracticePage() {
     setAnswers({});
     setCurrentIndex(0);
     setLastAttempt(null);
+    setShuffleSeed((prev) => prev + 1);
+    setLiveQuestions([]);
     setStartedAt(new Date().toISOString());
     setQuizState("running");
   }
@@ -257,7 +297,32 @@ export default function PracticePage() {
         </Link>
       }
     >
-      {quizState === "topic-selection" ? (
+      <div className="flex justify-center mb-8">
+        <div className="bg-gray-800 rounded-full p-1 flex">
+          <button
+            onClick={() => setMode("quiz")}
+            className={`px-6 py-2 rounded-full text-sm font-semibold ${
+              mode === "quiz"
+                ? "bg-blue-600 text-white"
+                : "bg-transparent text-gray-400 hover:bg-gray-700"
+            }`}
+          >
+            Quiz Catalog
+          </button>
+          <button
+            onClick={() => setMode("notes")}
+            className={`px-6 py-2 rounded-full text-sm font-semibold ${
+              mode === "notes"
+                ? "bg-blue-600 text-white"
+                : "bg-transparent text-gray-400 hover:bg-gray-700"
+            }`}
+          >
+            Notes Catalog
+          </button>
+        </div>
+      </div>
+
+      {mode === "quiz" && quizState === "topic-selection" ? (
         <>
           <GlassCard className="mt-6 animate-fade-up">
             {catalogTopics.length === 0 ? (
@@ -521,7 +586,50 @@ export default function PracticePage() {
         </>
       ) : null}
 
-      {quizState === "running" && currentQuestion ? (
+      {mode === "notes" ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-1">
+            <GlassCard>
+              <h3 className="text-base font-semibold">Notes Topics</h3>
+              <ul className="mt-4 space-y-2">
+                {catalogTopics.map((topic) => (
+                  <li key={topic.id}>
+                    <div className="flex justify-between items-center">
+                      <button
+                        onClick={() => handleSelectNoteTopic(topic.title)}
+                        className={`text-left w-full hover:text-blue-400 ${selectedNoteTopic === topic.title ? 'text-blue-500' : ''}`}
+                      >
+                        {topic.title}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </GlassCard>
+          </div>
+          <div className="md:col-span-2">
+            <GlassCard className="h-full">
+              {selectedNoteTopic && notes[selectedNoteTopic] ? (
+                <article className="prose prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {notes[selectedNoteTopic]}
+                  </ReactMarkdown>
+                </article>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-gray-400">
+                    {selectedNoteTopic
+                      ? `Notes for ${selectedNoteTopic} are not available yet.`
+                      : "Select a topic to view notes."}
+                  </p>
+                </div>
+              )}
+            </GlassCard>
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "quiz" && quizState === "running" && currentQuestion ? (
         <section className="grid gap-4 lg:grid-cols-[2fr_1fr]">
           <GlassCard className="animate-fade-up">
             <div className="flex items-center justify-between">
@@ -600,7 +708,7 @@ export default function PracticePage() {
         </section>
       ) : null}
 
-      {quizState === "completed" && lastAttempt ? (
+      {mode === "quiz" && quizState === "completed" && lastAttempt ? (
         <section className="grid gap-4 lg:grid-cols-[2fr_1fr]">
           <GlassCard className="animate-fade-up">
             <p className="text-xs uppercase tracking-wide text-qace-muted">Quiz Complete</p>

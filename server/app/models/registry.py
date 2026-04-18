@@ -95,21 +95,46 @@ def load_silero(model_dir: str, silero_onnx_path: str | None = None) -> Any:
 
 
 def load_face(face_onnx: str) -> Any:
-    """Load face ONNX model when present."""
-    try:
-        import onnxruntime as ort
+    """Load QnAce-Face-Model (EfficientNet-B2 PyTorch) from local directory."""
+    import sys
+    import importlib
 
-        path = Path(face_onnx)
-        if not path.exists():
-            logger.info("Face ONNX not found at %s (optional)", path)
-            return None
-        available = set(ort.get_available_providers())
-        providers = [p for p in ["CUDAExecutionProvider", "CPUExecutionProvider"] if p in available]
-        if not providers:
-            providers = ["CPUExecutionProvider"]
-        return ort.InferenceSession(str(path), providers=providers)
+    # Resolve model directory: <model_dir>/face-emotion/qnace
+    settings = get_settings()
+    model_dir = Path(settings.model_dir) / "face-emotion" / "qnace"
+    if not model_dir.exists():
+        logger.warning("QnAce-Face-Model not found at %s — face emotion unavailable", model_dir)
+        return None
+
+    weights_path = model_dir / "model.safetensors"
+    if not weights_path.exists():
+        logger.warning("QnAce-Face-Model weights not found at %s", weights_path)
+        return None
+
+    try:
+        import torch
+
+        # Inject the model directory so modeling_facial_emotion.py is importable
+        model_dir_str = str(model_dir)
+        if model_dir_str not in sys.path:
+            sys.path.insert(0, model_dir_str)
+
+        # Import custom classes directly (config has no auto_map)
+        mod = importlib.import_module("modeling_facial_emotion")
+        FacialEmotionConfig = mod.FacialEmotionConfig
+        FacialEmotionModel = mod.FacialEmotionModel
+
+        config = FacialEmotionConfig(num_classes=7, image_size=260, dropout=0.4)
+        model = FacialEmotionModel(config)
+        # Load safetensors weights
+        from safetensors.torch import load_file
+        state_dict = load_file(str(weights_path))
+        model.load_state_dict(state_dict)
+        model = model.to("cpu").eval()
+        logger.info("QnAce-Face-Model loaded from %s (CPU)", weights_path)
+        return model
     except Exception as exc:
-        logger.warning("Face model load failed (%s)", exc)
+        logger.warning("QnAce-Face-Model load failed (%s)", exc)
         return None
 
 
@@ -147,34 +172,45 @@ def load_bert(bert_onnx: str, tokenizer_name: str) -> tuple[Any, Any]:
 
 
 def _load_vocal_model(model_name: str, device_pref: str = "auto") -> Any:
-    """Load Wav2Vec2 vocal model when available."""
+    """Load QnAce-Voice-Model (Wav2Vec2 + attention pooling) from local directory."""
+    import sys
+
+    # Find the qnace voice model directory
+    settings = get_settings()
+    model_dir = Path(settings.model_dir) / "voice-emotion" / "qnace"
+    if not model_dir.exists():
+        logger.warning("QnAce-Voice-Model not found at %s — vocal emotion unavailable", model_dir)
+        return None
+
+    weights_path = model_dir / "pytorch_model.bin"
+    if not weights_path.exists():
+        logger.warning("QnAce-Voice-Model weights not found at %s", weights_path)
+        return None
+
     try:
         import torch
-        from transformers import AutoModelForAudioClassification
+
+        # Inject the model directory so qnace_emotion_model.py is importable
+        model_dir_str = str(model_dir)
+        if model_dir_str not in sys.path:
+            sys.path.insert(0, model_dir_str)
+
+        from qnace_emotion_model import load_qnace_emotion_model
+
+        model, emotions, config = load_qnace_emotion_model(str(weights_path))
 
         if device_pref == "auto":
-            candidates = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
-        elif device_pref == "cuda":
-            candidates = ["cuda", "cpu"]
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
         else:
-            candidates = [device_pref]
+            device = device_pref
 
-        model = AutoModelForAudioClassification.from_pretrained(model_name)
-        last_exc: Exception | None = None
-        for device in candidates:
-            try:
-                dtype = torch.float16 if device == "cuda" else torch.float32
-                loaded = model.to(device=device, dtype=dtype).eval()
-                logger.info("Vocal model loaded: %s (%s)", model_name, device)
-                return loaded
-            except Exception as exc:
-                last_exc = exc
-                logger.warning("Vocal model load failed on %s (%s)", device, exc)
-
-        logger.warning("Vocal model unavailable after retries (%s)", last_exc)
-        return None
+        model = model.to(device).eval()
+        # Attach emotions list so vocal.py can reference it if needed
+        model._qnace_emotions = emotions
+        logger.info("QnAce-Voice-Model loaded from %s (%s)", weights_path, device)
+        return model
     except Exception as exc:
-        logger.warning("Vocal model load failed (%s)", exc)
+        logger.warning("QnAce-Voice-Model load failed (%s)", exc)
         return None
 
 
@@ -208,12 +244,16 @@ async def prewarm_all() -> None:
         settings.vocal_device,
     )
     face_model = await loop.run_in_executor(None, load_face, settings.face_onnx)
-    bert_model, bert_tokenizer = await loop.run_in_executor(
-        None,
-        load_bert,
-        settings.bert_onnx,
-        settings.bert_tokenizer,
-    )
+    tq_backend = getattr(settings, "text_quality_backend", "llm").strip().lower()
+    if tq_backend == "bert":
+        bert_model, bert_tokenizer = await loop.run_in_executor(
+            None,
+            load_bert,
+            settings.bert_onnx,
+            settings.bert_tokenizer,
+        )
+    else:
+        logger.info("Skipping BERT model load (text_quality_backend=%s)", tq_backend)
 
     # Phase 4: synthesis runtime (TTS + avatar)
     tts_engine = await loop.run_in_executor(

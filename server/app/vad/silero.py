@@ -39,6 +39,7 @@ class EndOfSpeechDetector:
         silence_ms: int = 200,
         min_speech_s: float = 0.5,
         silero_session: Any = None,
+        on_speech_start: Optional[Callable[[], None]] = None,
         on_speech_end: Optional[Callable[[np.ndarray], None]] = None,
         semantic_turn_detector: Any = None,
         partial_transcript_provider: Optional[Callable[[], str]] = None,
@@ -46,6 +47,7 @@ class EndOfSpeechDetector:
         self.silence_threshold = int(silence_ms / 1000.0 * SAMPLE_RATE)
         self.min_speech_samples = int(min_speech_s * SAMPLE_RATE)
         self.silero = silero_session
+        self.on_speech_start = on_speech_start
         self.on_speech_end = on_speech_end
         # Optional Phase-advanced hooks are accepted for compatibility.
         self.semantic_turn_detector = semantic_turn_detector
@@ -98,6 +100,11 @@ class EndOfSpeechDetector:
                 self._speech_start_sample = self._total_samples
                 self._speech_buffer.clear()
                 logger.debug("Speech start at sample %d", self._total_samples)
+                if self.on_speech_start:
+                    try:
+                        self.on_speech_start()
+                    except Exception as exc:
+                        logger.error("on_speech_start callback error: %s", exc)
             self._silence_samples = 0
             self._speech_buffer.append(frame.copy())
         else:

@@ -1,22 +1,67 @@
-export const setupTracks = [
+export const jobRoles = [
   {
-    id: "technical",
-    title: "Technical",
-    description: "Algorithms, system design, trade-offs, and architecture communication.",
+    id: "cloud_computing",
+    title: "Cloud Computing",
+    description: "AWS, Azure, GCP, infrastructure design, DevOps, and cloud-native architecture.",
+    icon: "☁️",
   },
   {
-    id: "behavioral",
-    title: "Behavioral",
-    description: "STAR storytelling, stakeholder management, and collaboration clarity.",
+    id: "ai_engineering",
+    title: "AI Engineering",
+    description: "Machine learning pipelines, model deployment, MLOps, and AI system design.",
+    icon: "🤖",
   },
   {
-    id: "leadership",
-    title: "Leadership",
-    description: "Vision setting, execution, and cross-functional influence scenarios.",
+    id: "data_scientist",
+    title: "Data Scientist",
+    description: "Statistical analysis, data modeling, feature engineering, and experiment design.",
+    icon: "📊",
+  },
+  {
+    id: "web_engineering",
+    title: "Web Engineering",
+    description: "Frontend frameworks, REST/GraphQL APIs, performance optimization, and responsive design.",
+    icon: "🌐",
+  },
+  {
+    id: "software_engineer",
+    title: "Software Engineer",
+    description: "Algorithms, system design, data structures, and full-stack development.",
+    icon: "💻",
   },
 ];
 
-export const setupDifficulties = ["Warm-up", "Standard", "Advanced"];
+export const interviewTypes = [
+  {
+    id: "quick",
+    title: "Quick Interview",
+    description: "10-minute sprint with 5–7 focused questions. Great for a fast warm-up.",
+    durationMinutes: 10,
+    questionCount: 7,
+  },
+  {
+    id: "extensive",
+    title: "Extensive Interview",
+    description: "No time limit, ~15 harder questions. Full emotion and facial analysis enabled.",
+    durationMinutes: 0,
+    questionCount: 15,
+  },
+];
+
+export const roundTypes = [
+  {
+    id: "verbal",
+    title: "Verbal Interview",
+    description: "Traditional Q&A with the AI interviewer covering behavioral and technical questions.",
+    icon: "🎤",
+  },
+  {
+    id: "coding",
+    title: "Technical Coding",
+    description: "Solve coding problems in a live editor with real-time evaluation, complexity analysis, and scoring.",
+    icon: "🧑‍💻",
+  },
+];
 
 export const summary = {
   overall: 82,

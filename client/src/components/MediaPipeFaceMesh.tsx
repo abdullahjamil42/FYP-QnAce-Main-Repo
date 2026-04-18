@@ -12,7 +12,7 @@
 
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // MediaPipe Face Mesh types
 interface FaceLandmark {
@@ -118,31 +118,50 @@ export default function MediaPipeFaceMesh({
 
     async function initFaceMesh() {
       try {
-        // Dynamic import to avoid SSR issues
         const vision = await import("@mediapipe/tasks-vision");
-
         const { FaceLandmarker, FilesetResolver } = vision;
 
         const filesetResolver = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
         );
 
-        const faceLandmarker = await FaceLandmarker.createFromOptions(
-          filesetResolver,
-          {
-            baseOptions: {
-              modelAssetPath:
-                "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-              delegate: "GPU",
-            },
-            runningMode: "VIDEO",
-            numFaces: 1,
-            outputFaceBlendshapes: true,
-            outputFacialTransformationMatrixes: false,
-            minFaceDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5,
-          }
-        );
+        let faceLandmarker: any;
+        try {
+          faceLandmarker = await FaceLandmarker.createFromOptions(
+            filesetResolver,
+            {
+              baseOptions: {
+                modelAssetPath:
+                  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                delegate: "GPU",
+              },
+              runningMode: "VIDEO",
+              numFaces: 1,
+              outputFaceBlendshapes: true,
+              outputFacialTransformationMatrixes: false,
+              minFaceDetectionConfidence: 0.5,
+              minTrackingConfidence: 0.5,
+            }
+          );
+        } catch {
+          console.warn("MediaPipe GPU delegate failed, falling back to CPU");
+          faceLandmarker = await FaceLandmarker.createFromOptions(
+            filesetResolver,
+            {
+              baseOptions: {
+                modelAssetPath:
+                  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                delegate: "CPU",
+              },
+              runningMode: "VIDEO",
+              numFaces: 1,
+              outputFaceBlendshapes: true,
+              outputFacialTransformationMatrixes: false,
+              minFaceDetectionConfidence: 0.5,
+              minTrackingConfidence: 0.5,
+            }
+          );
+        }
 
         if (!cancelled) {
           faceMeshRef.current = faceLandmarker;
@@ -150,8 +169,8 @@ export default function MediaPipeFaceMesh({
         }
       } catch (err: any) {
         if (!cancelled) {
-          console.error("MediaPipe Face Mesh init error:", err);
-          setError(err?.message ?? "Failed to load face mesh");
+          console.warn("MediaPipe Face Mesh init error:", err);
+          setLoaded(true);
         }
       }
     }
@@ -250,7 +269,7 @@ export default function MediaPipeFaceMesh({
   }, [loaded, videoStream, fps, showOverlay, onResults]);
 
   return (
-    <div className="relative">
+    <div className="relative" style={{ transform: "scaleX(-1)" }}>
       <video
         ref={videoRef}
         className={`${videoClassName} bg-qace-surface object-cover shadow-lg`}
@@ -264,12 +283,7 @@ export default function MediaPipeFaceMesh({
           className={`pointer-events-none absolute inset-0 ${videoClassName}`}
         />
       )}
-      {error && (
-        <div className="absolute bottom-2 left-2 right-2 rounded bg-red-900/80 px-2 py-1 text-xs text-red-300">
-          {error}
-        </div>
-      )}
-      {!loaded && !error && (
+      {!loaded && (
         <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-qace-dark/50">
           <span className="animate-pulse text-sm text-qace-muted">
             Loading face mesh…
