@@ -16,12 +16,98 @@ import {
   type MCQAttemptRecord,
   type MCQTopicProgress,
 } from "@/lib/mcq-progress-store";
-import { getNoteForTopic } from "@/lib/notes";
+import { listNoteTopics, getNoteByFile, parseNoteSections, preprocessNoteContent, type NoteSection } from "@/lib/notes";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import type { Components } from "react-markdown";
 
 const QUESTIONS_PER_RUN = 4;
 const MIXED_TOPIC_ID = "__mixed__";
+
+/** Custom ReactMarkdown components for styled study notes */
+const mdComponents: Components = {
+  // Syntax-highlighted code blocks
+  code({ node, className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className ?? "");
+    const isBlock = match !== null;
+    if (isBlock) {
+      return (
+        <SyntaxHighlighter
+          style={vscDarkPlus as Record<string, React.CSSProperties>}
+          language={match[1]}
+          PreTag="div"
+          customStyle={{
+            borderRadius: "12px",
+            fontSize: "0.82rem",
+            margin: "1.25rem 0",
+            padding: "1.25rem 1.5rem",
+            overflowX: "auto",
+          }}
+          codeTagProps={{ style: { fontFamily: "'Fira Code', 'Cascadia Code', monospace" } }}
+        >
+          {String(children).replace(/\n$/, "")}
+        </SyntaxHighlighter>
+      );
+    }
+    return (
+      <code className="bg-blue-50 text-blue-800 px-1.5 py-0.5 rounded text-sm font-mono border border-blue-100" {...props}>
+        {children}
+      </code>
+    );
+  },
+  // Callout blockquotes (⚠️ Interview Gotcha, 💡 Tip, 📌 Must-Know)
+  blockquote({ children }) {
+    const text = String(children ?? "");
+    const isWarning = /⚠/.test(text);
+    const isTip     = /💡/.test(text);
+    const bg = isWarning
+      ? "bg-amber-50 border-amber-400"
+      : isTip
+      ? "bg-green-50 border-green-400"
+      : "bg-blue-50 border-blue-400";
+    return (
+      <div className={`my-4 rounded-xl border-l-4 px-5 py-3 ${bg} not-prose`}>
+        <p className="text-sm leading-relaxed text-gray-800">{children}</p>
+      </div>
+    );
+  },
+  // Large section heading (## → h2)
+  h2({ children }) {
+    return (
+      <h2 className="flex items-center gap-2 text-xl font-bold text-indigo-700 mt-8 mb-3 pb-2 border-b-2 border-indigo-100 not-prose">
+        {children}
+      </h2>
+    );
+  },
+  // Sub-heading (### → h3)
+  h3({ children }) {
+    return (
+      <h3 className="text-base font-bold text-gray-800 mt-5 mb-2 not-prose">
+        {children}
+      </h3>
+    );
+  },
+  // Paragraphs
+  p({ children }) {
+    return <p className="text-gray-700 leading-relaxed mb-3 text-[0.95rem]">{children}</p>;
+  },
+  // Lists
+  ul({ children }) {
+    return <ul className="list-disc list-outside ml-5 space-y-1 mb-3 text-gray-700 text-[0.95rem]">{children}</ul>;
+  },
+  ol({ children }) {
+    return <ol className="list-decimal list-outside ml-5 space-y-1 mb-3 text-gray-700 text-[0.95rem]">{children}</ol>;
+  },
+  li({ children }) {
+    return <li className="leading-relaxed pl-1">{children}</li>;
+  },
+  // Strong / bold
+  strong({ children }) {
+    return <strong className="font-semibold text-gray-900">{children}</strong>;
+  },
+};
 
 function cleanQuestionPrompt(prompt: string): string {
   return prompt.replace(/^\[[^\]]+\]\s*/, "").trim();
@@ -57,15 +143,9 @@ type CatalogSubtopic = {
   title: string;
 };
 
-type TopicNote = {
-  topic_id: string;
-  title: string;
-  content?: string;
-};
-
 export default function PracticePage() {
   const supabase = getSupabaseClient();
-  const [mode, setMode] = useState<"quiz" | "notes" | "study">("quiz");
+  const [mode, setMode] = useState<"quiz" | "study">("quiz");
   const [quizState, setQuizState] = useState<QuizState>("topic-selection");
   const [activeTopicId, setActiveTopicId] = useState<string>("technical");
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -88,16 +168,13 @@ export default function PracticePage() {
 
   // Notes state
   const [user, setUser] = useState<User | null>(null);
+  const [bucketTopics, setBucketTopics] = useState<{ file: string; label: string }[]>([]);
+  const [bucketTopicsLoading, setBucketTopicsLoading] = useState(false);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loadingNotes, setLoadingNotes] = useState<Record<string, boolean>>({});
-  const [selectedNoteTopic, setSelectedNoteTopic] = useState<string | null>(null);
-
-  // Study Notes state
-  const [topicNotes, setTopicNotes] = useState<TopicNote[]>([]);
-  const [topicNotesLoading, setTopicNotesLoading] = useState(false);
   const [selectedStudyTopic, setSelectedStudyTopic] = useState<string | null>(null);
-  const [studyContent, setStudyContent] = useState<string | null>(null);
-  const [studyContentLoading, setStudyContentLoading] = useState(false);
+  const [parsedSections, setParsedSections] = useState<NoteSection[]>([]);
+  const [selectedSectionIdx, setSelectedSectionIdx] = useState(0);
 
   const [shuffleSeed, setShuffleSeed] = useState(0);
 
@@ -185,39 +262,34 @@ export default function PracticePage() {
     };
   }, [supabase]);
 
-  const fetchTopicList = async () => {
-    if (!supabase) return;
-    setTopicNotesLoading(true);
-    const { data, error } = await supabase
-      .from("topic_notes" as any)
-      .select("topic_id, title")
-      .order("title");
-    if (error) console.error("topic_notes fetch error:", error);
-    else setTopicNotes((data as TopicNote[]) ?? []);
-    setTopicNotesLoading(false);
-  };
 
-  const fetchStudyContent = async (topicId: string) => {
-    if (!supabase) return;
-    setSelectedStudyTopic(topicId);
-    setStudyContent(null);
-    setStudyContentLoading(true);
-    const { data, error } = await supabase
-      .from("topic_notes" as any)
-      .select("content")
-      .eq("topic_id", topicId)
-      .single();
-    if (!error) setStudyContent((data as any)?.content ?? null);
-    setStudyContentLoading(false);
-  };
-
-  const handleSelectNoteTopic = (topic: string) => {
-    const note = getNoteForTopic(topic);
-    if (note) {
-      setNotes((prev) => ({ ...prev, [topic]: note }));
+  const handleSelectStudyTopic = async (file: string, label: string) => {
+    setSelectedStudyTopic(file);
+    setSelectedSectionIdx(0);
+    if (notes[file]) {
+      setParsedSections(parseNoteSections(notes[file]));
+      return;
     }
-    setSelectedNoteTopic(topic);
+    setLoadingNotes((prev) => ({ ...prev, [file]: true }));
+    const note = await getNoteByFile(file);
+    if (note) {
+      setNotes((prev) => ({ ...prev, [file]: note }));
+      setParsedSections(parseNoteSections(note));
+    }
+    setLoadingNotes((prev) => ({ ...prev, [file]: false }));
   };
+
+  // Load bucket topic list when entering study mode
+  useEffect(() => {
+    if (mode === "study" && bucketTopics.length === 0) {
+      setBucketTopicsLoading(true);
+      void listNoteTopics().then((topics) => {
+        setBucketTopics(topics);
+        setBucketTopicsLoading(false);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   function startTopicQuiz(topicId: string) {
     setActiveTopicId(topicId);
@@ -290,11 +362,7 @@ export default function PracticePage() {
     setQuizState("running");
   }
 
-  // Study Notes derived
-  useEffect(() => {
-    if (mode === "study" && topicNotes.length === 0) void fetchTopicList();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+
 
   const selectedCatalogTopic = useMemo(() => {
     if (!selectedCatalogTopicId) {
@@ -353,16 +421,6 @@ export default function PracticePage() {
             }`}
           >
             Quiz Catalog
-          </button>
-          <button
-            onClick={() => setMode("notes")}
-            className={`px-6 py-2 rounded-full text-sm font-semibold ${
-              mode === "notes"
-                ? "bg-blue-600 text-white"
-                : "bg-transparent text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            Notes Catalog
           </button>
           <button
             onClick={() => setMode("study")}
@@ -641,87 +699,112 @@ export default function PracticePage() {
         </>
       ) : null}
 
-      {mode === "notes" ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-1">
-            <GlassCard>
-              <h3 className="text-base font-semibold">Notes Topics</h3>
-              <ul className="mt-4 space-y-2">
-                {catalogTopics.map((topic) => (
-                  <li key={topic.id}>
-                    <div className="flex justify-between items-center">
-                      <button
-                        onClick={() => handleSelectNoteTopic(topic.title)}
-                        className={`text-left w-full hover:text-blue-400 ${selectedNoteTopic === topic.title ? 'text-blue-500' : ''}`}
-                      >
-                        {topic.title}
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </GlassCard>
-          </div>
-          <div className="md:col-span-2">
-            <GlassCard className="h-full">
-              {selectedNoteTopic && notes[selectedNoteTopic] ? (
-                <article className="prose prose-invert max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {notes[selectedNoteTopic]}
-                  </ReactMarkdown>
-                </article>
-              ) : (
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-gray-400">
-                    {selectedNoteTopic
-                      ? `Notes for ${selectedNoteTopic} are not available yet.`
-                      : "Select a topic to view notes."}
-                  </p>
-                </div>
-              )}
-            </GlassCard>
-          </div>
-        </div>
-      ) : null}
+
 
       {mode === "study" ? (
         <div className="-mx-4 flex flex-col" style={{ minHeight: "60vh" }}>
           {/* Topics row */}
           <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex gap-2 overflow-x-auto">
-            {topicNotesLoading
-              ? [...Array(5)].map((_, i) => <div key={i} className="h-8 w-32 bg-gray-700 rounded-full animate-pulse shrink-0" />)
-              : topicNotes.length === 0
-              ? <p className="text-gray-500 text-sm self-center">No topics available.</p>
-              : topicNotes.map((t) => (
+            {bucketTopicsLoading
+              ? [...Array(3)].map((_, i) => <div key={i} className="h-8 w-32 bg-gray-700 rounded-full animate-pulse shrink-0" />)
+              : bucketTopics.length === 0
+              ? <p className="text-gray-500 text-sm self-center">No notes available.</p>
+              : bucketTopics.map((t) => (
                   <button
-                    key={t.topic_id}
-                    onClick={() => void fetchStudyContent(t.topic_id)}
+                    key={t.file}
+                    onClick={() => void handleSelectStudyTopic(t.file, t.label)}
                     className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-colors ${
-                      selectedStudyTopic === t.topic_id ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                      selectedStudyTopic === t.file ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
                     }`}
-                  >{t.title}</button>
+                  >{t.label}</button>
                 ))}
           </div>
 
           {/* Content area */}
           <div className="flex-1 overflow-y-auto p-6">
-            {studyContentLoading ? (
+            {selectedStudyTopic && loadingNotes[selectedStudyTopic] ? (
               <div className="flex justify-center items-center h-64">
                 <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
               </div>
-            ) : studyContent ? (
-              <div className="max-w-4xl mx-auto">
-                <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-12 py-10">
-                  <article className="prose prose-slate max-w-none prose-headings:font-bold prose-h1:text-3xl prose-h1:pb-3 prose-h1:mb-6 prose-h1:border-b prose-h1:border-gray-200 prose-h2:text-2xl prose-h2:mt-8 prose-h3:text-lg prose-h3:text-blue-700 prose-p:text-gray-700 prose-p:leading-relaxed prose-li:text-gray-700 prose-strong:text-gray-900 prose-code:bg-gray-100 prose-code:text-blue-700 prose-code:rounded prose-code:text-sm prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:rounded-xl">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{studyContent}</ReactMarkdown>
-                  </article>
+            ) : selectedStudyTopic && notes[selectedStudyTopic] ? (
+              parsedSections.length > 0 ? (
+                /* Sub-topic layout: sidebar + content */
+                <div className="max-w-6xl mx-auto flex gap-6 items-start">
+                  {/* Sub-topic sidebar */}
+                  <div className="w-64 shrink-0 sticky top-4">
+                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                      <div className="bg-blue-600 px-4 py-3">
+                        <h3 className="text-white font-semibold text-sm uppercase tracking-wide">Sub-Topics</h3>
+                      </div>
+                      <nav className="py-1 max-h-[70vh] overflow-y-auto">
+                        {parsedSections.map((section, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setSelectedSectionIdx(idx)}
+                            className={`w-full text-left px-4 py-2.5 text-sm transition-colors border-l-4 ${
+                              selectedSectionIdx === idx
+                                ? "bg-blue-50 text-blue-700 font-semibold border-blue-600"
+                                : "text-gray-700 hover:bg-gray-50 border-transparent"
+                            }`}
+                          >
+                            {section.title}
+                          </button>
+                        ))}
+                      </nav>
+                    </div>
+                  </div>
+
+                  {/* Section content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-10 py-8">
+                      <h2 className="text-2xl font-extrabold text-blue-700 mb-6 pb-3 border-b-2 border-blue-100 tracking-tight">
+                        {parsedSections[selectedSectionIdx]?.title ?? ""}
+                      </h2>
+                      <div className="space-y-0">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                          {preprocessNoteContent(parsedSections[selectedSectionIdx]?.content ?? "")}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                    {/* Prev / Next navigation */}
+                    <div className="flex justify-between mt-4">
+                      <button
+                        disabled={selectedSectionIdx === 0}
+                        onClick={() => setSelectedSectionIdx((i) => Math.max(0, i - 1))}
+                        className="px-4 py-2 rounded-lg bg-gray-700 text-gray-200 text-sm font-medium disabled:opacity-30 hover:bg-gray-600 transition-colors"
+                      >
+                        ← Previous
+                      </button>
+                      <span className="text-gray-500 text-sm self-center">
+                        {selectedSectionIdx + 1} / {parsedSections.length}
+                      </span>
+                      <button
+                        disabled={selectedSectionIdx === parsedSections.length - 1}
+                        onClick={() => setSelectedSectionIdx((i) => Math.min(parsedSections.length - 1, i + 1))}
+                        className="px-4 py-2 rounded-lg bg-gray-700 text-gray-200 text-sm font-medium disabled:opacity-30 hover:bg-gray-600 transition-colors"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Fallback: full content without sections */
+                <div className="max-w-4xl mx-auto">
+                  <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-12 py-10">
+                    <div className="space-y-0">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                        {preprocessNoteContent(notes[selectedStudyTopic])}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                </div>
+              )
             ) : (
               <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
                 {!selectedStudyTopic
                   ? <p className="text-gray-400 text-lg">Select a topic from the bar above to start studying.</p>
-                  : <p className="text-gray-500">Failed to load content. Please try again.</p>}
+                  : <p className="text-gray-500">Notes not available for this topic.</p>}
               </div>
             )}
           </div>
