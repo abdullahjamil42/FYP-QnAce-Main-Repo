@@ -57,9 +57,15 @@ type CatalogSubtopic = {
   title: string;
 };
 
+type TopicNote = {
+  topic_id: string;
+  title: string;
+  content?: string;
+};
+
 export default function PracticePage() {
   const supabase = getSupabaseClient();
-  const [mode, setMode] = useState<"quiz" | "notes">("quiz");
+  const [mode, setMode] = useState<"quiz" | "notes" | "study">("quiz");
   const [quizState, setQuizState] = useState<QuizState>("topic-selection");
   const [activeTopicId, setActiveTopicId] = useState<string>("technical");
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -85,6 +91,13 @@ export default function PracticePage() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loadingNotes, setLoadingNotes] = useState<Record<string, boolean>>({});
   const [selectedNoteTopic, setSelectedNoteTopic] = useState<string | null>(null);
+
+  // Study Notes state
+  const [topicNotes, setTopicNotes] = useState<TopicNote[]>([]);
+  const [topicNotesLoading, setTopicNotesLoading] = useState(false);
+  const [selectedStudyTopic, setSelectedStudyTopic] = useState<string | null>(null);
+  const [studyContent, setStudyContent] = useState<string | null>(null);
+  const [studyContentLoading, setStudyContentLoading] = useState(false);
 
   const [shuffleSeed, setShuffleSeed] = useState(0);
 
@@ -172,6 +185,32 @@ export default function PracticePage() {
     };
   }, [supabase]);
 
+  const fetchTopicList = async () => {
+    if (!supabase) return;
+    setTopicNotesLoading(true);
+    const { data, error } = await supabase
+      .from("topic_notes" as any)
+      .select("topic_id, title")
+      .order("title");
+    if (error) console.error("topic_notes fetch error:", error);
+    else setTopicNotes((data as TopicNote[]) ?? []);
+    setTopicNotesLoading(false);
+  };
+
+  const fetchStudyContent = async (topicId: string) => {
+    if (!supabase) return;
+    setSelectedStudyTopic(topicId);
+    setStudyContent(null);
+    setStudyContentLoading(true);
+    const { data, error } = await supabase
+      .from("topic_notes" as any)
+      .select("content")
+      .eq("topic_id", topicId)
+      .single();
+    if (!error) setStudyContent((data as any)?.content ?? null);
+    setStudyContentLoading(false);
+  };
+
   const handleSelectNoteTopic = (topic: string) => {
     const note = getNoteForTopic(topic);
     if (note) {
@@ -251,6 +290,12 @@ export default function PracticePage() {
     setQuizState("running");
   }
 
+  // Study Notes derived
+  useEffect(() => {
+    if (mode === "study" && topicNotes.length === 0) void fetchTopicList();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
   const selectedCatalogTopic = useMemo(() => {
     if (!selectedCatalogTopicId) {
       return null;
@@ -318,6 +363,16 @@ export default function PracticePage() {
             }`}
           >
             Notes Catalog
+          </button>
+          <button
+            onClick={() => setMode("study")}
+            className={`px-6 py-2 rounded-full text-sm font-semibold ${
+              mode === "study"
+                ? "bg-blue-600 text-white"
+                : "bg-transparent text-gray-400 hover:bg-gray-700"
+            }`}
+          >
+            Study Notes
           </button>
         </div>
       </div>
@@ -625,6 +680,50 @@ export default function PracticePage() {
                 </div>
               )}
             </GlassCard>
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "study" ? (
+        <div className="-mx-4 flex flex-col" style={{ minHeight: "60vh" }}>
+          {/* Topics row */}
+          <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex gap-2 overflow-x-auto">
+            {topicNotesLoading
+              ? [...Array(5)].map((_, i) => <div key={i} className="h-8 w-32 bg-gray-700 rounded-full animate-pulse shrink-0" />)
+              : topicNotes.length === 0
+              ? <p className="text-gray-500 text-sm self-center">No topics available.</p>
+              : topicNotes.map((t) => (
+                  <button
+                    key={t.topic_id}
+                    onClick={() => void fetchStudyContent(t.topic_id)}
+                    className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-colors ${
+                      selectedStudyTopic === t.topic_id ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                    }`}
+                  >{t.title}</button>
+                ))}
+          </div>
+
+          {/* Content area */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {studyContentLoading ? (
+              <div className="flex justify-center items-center h-64">
+                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : studyContent ? (
+              <div className="max-w-4xl mx-auto">
+                <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-12 py-10">
+                  <article className="prose prose-slate max-w-none prose-headings:font-bold prose-h1:text-3xl prose-h1:pb-3 prose-h1:mb-6 prose-h1:border-b prose-h1:border-gray-200 prose-h2:text-2xl prose-h2:mt-8 prose-h3:text-lg prose-h3:text-blue-700 prose-p:text-gray-700 prose-p:leading-relaxed prose-li:text-gray-700 prose-strong:text-gray-900 prose-code:bg-gray-100 prose-code:text-blue-700 prose-code:rounded prose-code:text-sm prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:rounded-xl">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{studyContent}</ReactMarkdown>
+                  </article>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
+                {!selectedStudyTopic
+                  ? <p className="text-gray-400 text-lg">Select a topic from the bar above to start studying.</p>
+                  : <p className="text-gray-500">Failed to load content. Please try again.</p>}
+              </div>
+            )}
           </div>
         </div>
       ) : null}
