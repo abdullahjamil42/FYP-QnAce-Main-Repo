@@ -19,14 +19,34 @@ logger = logging.getLogger("qace.coverage")
 
 # ── Structural elements expected per subtype ─────────────────────────────
 
-_BEHAVIORAL_PATTERNS: list[re.Pattern] = [
-    # Past-tense narrative
-    re.compile(r"\b(I|we)\s+(did|led|built|created|managed|developed|implemented|designed|coordinated|handled|resolved|improved|reduced|increased)\b", re.I),
-    # Action taken
-    re.compile(r"\b(my (role|task|responsibility)|I (decided|chose|took|initiated|proposed|recommended))\b", re.I),
-    # Outcome / result
-    re.compile(r"\b(result(ed)?|outcome|impact|improved|reduced|increased|saved|achieved|delivered|led to|grew|raised)\b", re.I),
-]
+# STAR-component patterns for behavioral questions.
+# Action is weighted 2× (0.40) — it's the substance of the answer.
+_BEHAVIORAL_STAR: dict[str, list[str]] = {
+    "situation": [
+        r"\b(when|during|at the time|in \d{4}|last (year|month|quarter))\b",
+        r"\b(we were|our team|I was working|my role was)\b",
+    ],
+    "task": [
+        r"\b(my (responsibility|job|goal|objective) was|I (had to|needed to|was tasked))\b",
+        r"\b(the (problem|challenge|issue) was|we needed to)\b",
+    ],
+    "action": [
+        r"\b(I (decided|chose|implemented|built|designed|led|wrote|analyzed))\b",
+        r"\b(first I|then I|next I|so I|I started by)\b",
+        r"\b(I (reached out|collaborated|proposed|suggested|escalated))\b",
+    ],
+    "result": [
+        r"\b(as a result|the outcome|we (achieved|improved|reduced|increased|shipped))\b",
+        r"\b(\d+\s?%|by \d+|from \d+ to \d+|within \d+ (days|weeks|months))\b",
+        r"\b(learned|takeaway|in retrospect|if I did it again)\b",
+    ],
+}
+_STAR_WEIGHTS: dict[str, float] = {
+    "situation": 0.15,
+    "task":      0.15,
+    "action":    0.40,
+    "result":    0.30,
+}
 
 _TECHNICAL_PATTERNS: list[re.Pattern] = [
     # Mechanism explanation
@@ -43,8 +63,7 @@ _SITUATIONAL_PATTERNS: list[re.Pattern] = [
 ]
 
 _SUBTYPE_PATTERNS = {
-    "behavioral": _BEHAVIORAL_PATTERNS,
-    "technical": _TECHNICAL_PATTERNS,
+    "technical":   _TECHNICAL_PATTERNS,
     "situational": _SITUATIONAL_PATTERNS,
 }
 
@@ -102,11 +121,24 @@ async def classify_question_subtype(
 
 def compute_coverage_score(transcript: str, question_subtype: str) -> float:
     """
-    Score how well the transcript covers expected structural elements.
+    Score how well the transcript covers expected structural elements (0.0–1.0).
 
-    Returns a float 0.0-1.0 = ``elements_found / elements_expected``,
-    capped at 1.0.
+    Behavioral answers use STAR-component scoring with differential weights:
+      situation 15% + task 15% + action 40% + result 30%
+    This gives partial credit rather than binary 0/1 per element.
+
+    Technical and situational use the legacy regex pattern ratio.
     """
+    if question_subtype == "behavioral":
+        t = transcript.lower()
+        total = 0.0
+        for component, raw_patterns in _BEHAVIORAL_STAR.items():
+            patterns = [re.compile(p, re.I) for p in raw_patterns]
+            hits = sum(1 for p in patterns if p.search(t))
+            component_score = min(hits / len(patterns), 1.0)
+            total += component_score * _STAR_WEIGHTS[component]
+        return total
+
     patterns = _SUBTYPE_PATTERNS.get(question_subtype)
     if patterns is None:
         return 0.5  # unknown subtype → neutral

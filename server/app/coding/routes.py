@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -45,6 +46,28 @@ def _load_dsa_problems() -> list[dict[str, Any]]:
     logger.warning("dsa_final_a_plus.json not found")
     _DSA_CACHE = []
     return _DSA_CACHE
+
+
+# ── DSA test cases from separate JSON file (keyed by string problem ID) ──
+_DSA_TESTS_CACHE: dict[str, dict] | None = None
+
+
+def _load_dsa_test_cases() -> dict[str, dict]:
+    global _DSA_TESTS_CACHE
+    if _DSA_TESTS_CACHE is not None:
+        return _DSA_TESTS_CACHE
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent.parent / "data" / "dsa_test_cases.json",
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "data" / "dsa_test_cases.json",
+    ]
+    for p in candidates:
+        if p.is_file():
+            _DSA_TESTS_CACHE = json.loads(p.read_text(encoding="utf-8"))
+            logger.info("Loaded DSA test cases for %d problems", len(_DSA_TESTS_CACHE))
+            return _DSA_TESTS_CACHE
+    logger.warning("data/dsa_test_cases.json not found — DSA mode will use single-run fallback")
+    _DSA_TESTS_CACHE = {}
+    return _DSA_TESTS_CACHE
 
 
 class RunRequest(BaseModel):
@@ -216,15 +239,32 @@ async def get_dsa_problem(problem_id: int):
 
     description = _build_dsa_description(prob)
 
+    # Progressive hints: original LeetCode hints first, then approach, then reference code
+    _hints: list[str] = list(prob.get("hints") or [])
+    _approach = (prob.get("optimal_approach") or "").strip()
+    if _approach and _approach not in _hints:
+        _hints.append(_approach)
+    _ref = (prob.get("python_code") or "").strip()
+    if _ref:
+        _hints.append(f"Reference solution:\n{_ref}")
+
+    _raw_c = prob.get("constraints")
+    if isinstance(_raw_c, list):
+        _constraints_out: Any = _raw_c
+    elif isinstance(_raw_c, str) and _raw_c:
+        _constraints_out = [_raw_c]
+    else:
+        _constraints_out = [f"Expected: {prob.get('time_complexity', '')} time, {prob.get('space_complexity', '')} space"]
+
     return {
         "id": str(prob["id"]),
         "title": prob["title"],
         "difficulty": prob["difficulty"],
-        "topics": [prob["category"]],
+        "topics": list(prob.get("topics") or [prob.get("category", "")]),
         "description": description,
-        "examples": [],
-        "constraints": f"Expected: {prob['time_complexity']} time, {prob['space_complexity']} space",
-        "hints": [prob.get("optimal_approach", "")[:500]] if prob.get("optimal_approach") else [],
+        "examples": list(prob.get("examples") or []),
+        "constraints": _constraints_out,
+        "hints": _hints,
         "reference_solution": prob.get("python_code", ""),
         "time_complexity": prob.get("time_complexity", ""),
         "space_complexity": prob.get("space_complexity", ""),
@@ -241,49 +281,85 @@ async def interview_run(
     if not judge0_url:
         raise HTTPException(status_code=503, detail="JUDGE0_API_URL not configured")
 
-    # DSA mode: run code without test-case validation (no test cases in JSON bank)
+    # DSA mode: run visible test cases (falls back to compile-check if none generated yet)
     if body.source == "dsa":
         try:
-            res = await judge0_client.submit_once(
-                judge0_url,
-                source_code=body.source_code,
-                language_id=body.language_id,
-                stdin="",
-                expected_output=None,
-                wait=True,
-            )
-            stdout = _norm(res.get("stdout", ""))
-            stderr = res.get("stderr", "")
-            status = res.get("status_description", "")
-            return {
-                "results": [
+            pid = int(body.problem_id)
+        except (ValueError, TypeError):
+            pid = -1
+        tc_data = _load_dsa_test_cases().get(str(pid), {})
+        visible_tests = [t for t in tc_data.get("test_cases", []) if not t.get("is_hidden", False)]
+
+        if not visible_tests:
+            # Graceful fallback: test cases not yet generated — just compile-check the code
+            try:
+                res = await judge0_client.submit_once(
+                    judge0_url,
+                    source_code=body.source_code,
+                    language_id=body.language_id,
+                    stdin="",
+                    expected_output=None,
+                    wait=True,
+                )
+                stdout = _norm(res.get("stdout", ""))
+                stderr = res.get("stderr", "")
+                status = res.get("status_description", "")
+                return {
+                    "results": [
+                        {
+                            "stdin": "",
+                            "stdout": stdout,
+                            "stderr": stderr,
+                            "expected": "",
+                            "passed": not res.get("error") and not stderr,
+                            "time": res.get("time"),
+                            "memory": res.get("memory"),
+                            "status": status,
+                        }
+                    ]
+                }
+            except Exception as exc:
+                return {
+                    "results": [
+                        {
+                            "stdin": "",
+                            "stdout": "",
+                            "stderr": str(exc),
+                            "expected": "",
+                            "passed": False,
+                            "time": None,
+                            "memory": None,
+                            "status": "error",
+                        }
+                    ]
+                }
+
+        results: list[dict[str, Any]] = []
+        for t in visible_tests:
+            try:
+                row = await _run_judge(
+                    judge0_url,
+                    body.source_code,
+                    body.language_id,
+                    t.get("stdin", ""),
+                    t.get("expected_output", ""),
+                )
+                results.append(row)
+            except Exception as exc:
+                logger.warning("DSA run case failed: %s", exc)
+                results.append(
                     {
-                        "stdin": "",
-                        "stdout": stdout,
-                        "stderr": stderr,
-                        "expected": "",
-                        "passed": not res.get("error") and not stderr,
-                        "time": res.get("time"),
-                        "memory": res.get("memory"),
-                        "status": status,
-                    }
-                ]
-            }
-        except Exception as exc:
-            return {
-                "results": [
-                    {
-                        "stdin": "",
+                        "stdin": t.get("stdin", ""),
                         "stdout": "",
                         "stderr": str(exc),
-                        "expected": "",
+                        "expected": _norm(t.get("expected_output", "")),
                         "passed": False,
                         "time": None,
                         "memory": None,
                         "status": "error",
                     }
-                ]
-            }
+                )
+        return {"results": results}
 
     base, key = _settings_ok()
     tests = await fetch_test_cases(base, key, body.problem_id, hidden=False)
@@ -410,7 +486,7 @@ async def interview_submit(
     if not judge0_url:
         raise HTTPException(status_code=503, detail="JUDGE0_API_URL not configured")
 
-    # ── DSA mode: LLM-only analysis (no Supabase test cases) ──
+    # ── DSA mode: test-case correctness + empirical benchmark + LLM scoring ──
     if body.source == "dsa":
         problems = _load_dsa_problems()
         try:
@@ -421,21 +497,98 @@ async def interview_submit(
         if not prob:
             raise HTTPException(status_code=404, detail="DSA problem not found")
 
-        # Run code once to capture output
-        run_res = await judge0_client.submit_once(
-            judge0_url,
-            source_code=body.source_code,
-            language_id=body.language_id,
-            stdin="",
-            expected_output=None,
-            wait=True,
-        )
-        has_error = bool(run_res.get("error") or run_res.get("stderr"))
-        code_ran = not has_error
-
+        tc_data = _load_dsa_test_cases().get(str(pid), {})
+        all_tests = tc_data.get("test_cases", [])
         ref_code = (prob.get("python_code") or "").strip()
         student_code = body.source_code.strip()
 
+        # ── Correctness: run all test cases (visible + hidden) ──
+        if all_tests:
+            dsa_failed: list[dict[str, Any]] = []
+            dsa_passed = 0
+            for t in all_tests:
+                try:
+                    row = await _run_judge(
+                        judge0_url,
+                        body.source_code,
+                        body.language_id,
+                        t.get("stdin", ""),
+                        t.get("expected_output", ""),
+                    )
+                    if row.get("passed"):
+                        dsa_passed += 1
+                    else:
+                        dsa_failed.append(
+                            {
+                                "stdin": row.get("stdin"),
+                                "expected": row.get("expected"),
+                                "actual": row.get("stdout"),
+                                "is_hidden": t.get("is_hidden", False),
+                            }
+                        )
+                except Exception as exc:
+                    dsa_failed.append(
+                        {
+                            "stdin": t.get("stdin"),
+                            "expected": t.get("expected_output"),
+                            "actual": "",
+                            "error": str(exc),
+                            "is_hidden": t.get("is_hidden", False),
+                        }
+                    )
+            correctness: dict[str, Any] = {
+                "passed": dsa_passed,
+                "total": len(all_tests),
+                "failed_cases": dsa_failed,
+            }
+            code_ran = dsa_passed > 0 or len(dsa_failed) == 0
+        else:
+            # Fallback: single run when test cases not generated yet
+            run_res = await judge0_client.submit_once(
+                judge0_url,
+                source_code=body.source_code,
+                language_id=body.language_id,
+                stdin="",
+                expected_output=None,
+                wait=True,
+            )
+            has_error = bool(run_res.get("error") or run_res.get("stderr"))
+            code_ran = not has_error
+            correctness = {
+                "passed": 1 if code_ran else 0,
+                "total": 1,
+                "failed_cases": [] if code_ran else [
+                    {"stdin": "", "expected": "", "actual": run_res.get("stderr", ""), "error": run_res.get("error", "")}
+                ],
+            }
+
+        # ── Empirical benchmark: 3 parallel Judge0 calls ──
+        bench = tc_data.get("complexity_benchmark_stdin", {})
+        t100 = t1000 = t10000 = None
+        if isinstance(bench, dict) and bench:
+            async def _bench_call(stdin_val: str) -> Optional[float]:
+                try:
+                    rb = await judge0_client.submit_once(
+                        judge0_url,
+                        source_code=body.source_code,
+                        language_id=body.language_id,
+                        stdin=str(stdin_val),
+                        wait=True,
+                    )
+                    if rb.get("error"):
+                        return None
+                    tv = rb.get("time")
+                    return float(tv) if tv is not None else None
+                except Exception:
+                    return None
+
+            t100, t1000, t10000 = await asyncio.gather(
+                _bench_call(bench.get("n100", "")),
+                _bench_call(bench.get("n1000", "")),
+                _bench_call(bench.get("n10000", "")),
+            )
+
+        # ── LLM scoring ──
         provider = resolve_provider_config(s)
         llm_out: dict[str, Any] | None = None
         if provider:
@@ -443,7 +596,8 @@ async def interview_submit(
                 f"Problem: {prob['title']}\n"
                 f"Category: {prob.get('category', '')}\n"
                 f"Expected complexity: {prob.get('time_complexity', '')} time, {prob.get('space_complexity', '')} space\n"
-                f"Reference approach: {prob.get('optimal_approach', '')[:2000]}\n\n"
+                f"Reference approach: {prob.get('optimal_approach', '')[:2000]}\n"
+                f"Runtimes (ms, Judge0 time field): n=100\u2192{t100}, n=1000\u2192{t1000}, n=10000\u2192{t10000}\n\n"
                 f"Student code:\n```\n{body.source_code[:12000]}\n```\n"
             )
             system = """You are a senior software engineer reviewing interview code.
@@ -472,16 +626,11 @@ Return ONLY valid JSON (no markdown, no extra text):
             except Exception as exc:
                 logger.warning("DSA LLM scoring failed: %s", exc)
 
-        # Heuristic fallback when LLM is unavailable
         if llm_out is None:
             llm_out = _dsa_heuristic_score(student_code, ref_code, prob, code_ran)
 
         return {
-            "correctness": {
-                "passed": 1 if code_ran else 0,
-                "total": 1,
-                "failed_cases": [] if code_ran else [{"stdin": "", "expected": "", "actual": run_res.get("stderr", ""), "error": run_res.get("error", "")}],
-            },
+            "correctness": correctness,
             "complexity": {
                 "time": llm_out.get("time_complexity", "Unknown"),
                 "space": llm_out.get("space_complexity", "Unknown"),
@@ -494,7 +643,7 @@ Return ONLY valid JSON (no markdown, no extra text):
                 "score": int(llm_out.get("quality_score") or 1),
             },
             "time_taken_seconds": int(body.time_taken_seconds or 0),
-            "empirical_ms": {"n100": None, "n1000": None, "n10000": None},
+            "empirical_ms": {"n100": t100, "n1000": t1000, "n10000": t10000},
         }
 
     base, key = _settings_ok()
@@ -655,19 +804,18 @@ async def interview_hint(
         prob = next((p for p in problems if p["id"] == pid), None)
         if not prob:
             raise HTTPException(status_code=404, detail="DSA problem not found")
-        approach = prob.get("optimal_approach", "")
-        ref_code = prob.get("python_code", "")
-        hints = []
-        if approach:
-            hints.append(approach[:500])
-        if len(approach) > 500:
-            hints.append(approach[500:])
-        if ref_code:
-            hints.append(f"Reference solution:\n{ref_code}")
-        if not hints:
+        # Progressive hints: original LeetCode hints first (gentlest), then approach, then reference code
+        dsa_hints: list[str] = list(prob.get("hints") or [])
+        _approach_h = (prob.get("optimal_approach") or "").strip()
+        _ref_h = (prob.get("python_code") or "").strip()
+        if _approach_h and _approach_h not in dsa_hints:
+            dsa_hints.append(_approach_h)
+        if _ref_h:
+            dsa_hints.append(f"Reference solution:\n{_ref_h}")
+        if not dsa_hints:
             raise HTTPException(status_code=404, detail="No hints available")
-        idx = min(hint_index, len(hints) - 1)
-        return {"hint": hints[idx], "hint_index": idx, "total_hints": len(hints)}
+        idx = min(hint_index, len(dsa_hints) - 1)
+        return {"hint": dsa_hints[idx], "hint_index": idx, "total_hints": len(dsa_hints)}
 
     base, key = _settings_ok()
     prob = await fetch_problem_row(base, key, problem_id)

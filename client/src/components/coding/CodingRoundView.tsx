@@ -68,15 +68,29 @@ export default function CodingRoundView({
   const [busy, setBusy] = useState(false);
   const [isDsa, setIsDsa] = useState(false);
 
+  const [elapsed, setElapsed] = useState(0); // seconds since problem loaded
+
   const startedAtRef = useRef<number>(Date.now());
   const lastKeyAtRef = useRef<number>(Date.now());
   const hintLevelRef = useRef(0);
   const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastRunSigRef = useRef<string>("");
   const runRepeatRef = useRef(0);
 
+  // Tick the elapsed timer every second
   useEffect(() => {
     startedAtRef.current = Date.now();
+    setElapsed(0);
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
+    }, 1000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [problemId]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -280,11 +294,26 @@ export default function CodingRoundView({
           {problem.description}
         </div>
         {Array.isArray(problem.examples) && problem.examples.length > 0 ? (
-          <div className="mt-4 rounded-xl bg-black/30 p-3 text-sm">
-            <p className="font-medium text-qace-muted">Examples</p>
-            <pre className="mt-2 overflow-x-auto text-xs">
-              {JSON.stringify(problem.examples, null, 2)}
-            </pre>
+          <div className="mt-4 space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-qace-muted">Examples</p>
+            {(problem.examples as { input?: string; output?: string }[]).map((ex, i) => {
+              // neenza stores the full formatted text in `input`; try to split on Output: if present
+              const raw = ex.input ?? "";
+              const outputMarker = raw.indexOf("\nOutput:");
+              const inputPart = outputMarker !== -1 ? raw.slice(0, outputMarker).trim() : raw.trim();
+              const outputPart = outputMarker !== -1 ? raw.slice(outputMarker + 1).trim() : (ex.output ?? "");
+              return (
+                <div key={i} className="rounded-xl bg-black/30 p-3 text-xs font-mono">
+                  <p className="mb-1 font-sans text-[10px] font-semibold uppercase tracking-wider text-qace-muted">
+                    Example {i + 1}
+                  </p>
+                  <p className="whitespace-pre-wrap text-white/80">{inputPart}</p>
+                  {outputPart && (
+                    <p className="mt-1 whitespace-pre-wrap text-emerald-300">{outputPart}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : null}
         {problem.constraints ? (
@@ -317,6 +346,10 @@ export default function CodingRoundView({
               </option>
             ))}
           </select>
+          {/* Elapsed timer */}
+          <span className="ml-auto font-mono text-sm tabular-nums text-qace-muted">
+            {String(Math.floor(elapsed / 60)).padStart(2, "0")}:{String(elapsed % 60).padStart(2, "0")}
+          </span>
           <button
             type="button"
             disabled={busy}

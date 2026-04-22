@@ -53,6 +53,32 @@ ACKNOWLEDGMENT_PHRASES = {
     "low": ["Okay.", "Alright, moving on.", "Sure."],
 }
 
+# ── Mode-aware acknowledgment phrases (Gap 2) ────────────────────────────
+# Empty list = no acknowledgment spoken before this mode's follow-up.
+MODE_ACKNOWLEDGMENTS: dict[str, list] = {
+    "PROBE_DEPTH": [
+        "Interesting — let me push on that a bit.",
+        "Okay, I want to dig into that further.",
+        "That's a useful framing. Let me ask you something more specific.",
+    ],
+    "PROBE_GAP": [
+        "I see.",
+        "Got it.",
+        "Okay — I want to make sure I understand.",
+    ],
+    "CHALLENGE": [
+        "Hmm. I want to push back on something you said.",
+        "Let me pause you there for a second.",
+    ],
+    "REDIRECT": [],   # No ack — should feel abrupt
+    "RESCUE": [],     # No ack — jump straight in
+    "INTERRUPT": [],  # No ack — polite interjection is already in the probe text
+    "CONFRONT": [],   # No ack — confrontation should not be softened
+    "ADVANCE_HIGH": ["Great, thank you.", "That's clear, thank you."],
+    "ADVANCE_MED":  ["Okay, got it.", "Understood."],
+    "ADVANCE_LOW":  ["Alright.", "Okay, let's move on."],
+}
+
 # ── Fallback encouragement phrases ───────────────────────────────────────
 _ENCOURAGEMENT_PHRASES = [
     "Take your time, I'm listening.",
@@ -469,6 +495,14 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
         "backchannel_active": False,
         "backchannel_track": None,
         "backchannel_log": [],
+        # Bug fixes + realism gaps
+        "transition_lock": asyncio.Lock(),          # Bug 4: atomic transition guard
+        "is_probe_cycle": False,                    # Bug 2: stricter silence after probes
+        "_pending_inflight_result": None,           # Bug 3: re-trigger after in-flight
+        "_pending_inflight_audio": None,            # Bug 3
+        "interviewer_voice": random.choice(["male", "female"]),  # Gap 3: locked per session
+        "last_interviewer_mode": "",               # Gap 2: mode-aware ack
+        "soft_prompt_sent": False,                 # Gap 5: mid-silence nonverbal at 5s
     }
     _sessions[session_id] = session
 
@@ -552,11 +586,14 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
         session["answer_prompted_spoken"] = False
         session["current_q_probe_count"] = 0
         session["fallback_timer_epoch"] = session.get("fallback_timer_epoch", 0) + 1
+        session["is_probe_cycle"] = False       # Bug 2: bank question resets probe flag
+        session["soft_prompt_sent"] = False     # Gap 5: reset per question
         if session.get("backchannel_active"):
             session["backchannel_active"] = False
 
         q = questions[q_index]
-        session["current_voice"] = _voice_for_question_type(q.get("type", ""))
+        # Gap 3: voice locked per session at bootstrap, not per question type
+        session["current_voice"] = session.get("interviewer_voice", "male")
         voice_label = _get_current_voice(session)
         voice_name = _get_voice_name(session, settings)
 
@@ -588,6 +625,9 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             await _speak_session_text(session, dc, spoken, send_status, voice=voice_name)
 
         # 4. Enter ANSWER phase — completeness-based detection
+        # Bug 1: drain VAD hardware buffer tail before re-enabling speech detection
+        session["speaking"] = False
+        await asyncio.sleep(0.30)
         session["current_phase"] = "answering"
         session["last_speech_time"] = time.perf_counter()
         session["answer_prompted_at"] = time.perf_counter()
@@ -624,6 +664,10 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
         is_intro = (q_index == -1)
         target_score = 0.40 if is_intro else 0.70
         high_score_silence = 2.5 if is_intro else 1.5
+        # Bug 2: probe answers are naturally short/focused — score faster but
+        # candidate may still be mid-thought. Give extra breathing room.
+        if session.get("is_probe_cycle") and not is_intro:
+            high_score_silence = 3.0
         low_score_silence = 6.0
         
         should_force = False
@@ -722,6 +766,13 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
                 await _transition_to_next(q_index)
                 return
 
+            # Gap 5: Nonverbal soft prompt at ~5s (before encouragement at 12s)
+            if not has_spoken and total_silence >= 5.0 and not session.get("soft_prompt_sent"):
+                session["soft_prompt_sent"] = True
+                from .data_channel import send_event
+                send_event(dc, "interviewer_prompt", {"type": "nonverbal"})
+                send_status(dc, "soft-prompt: nonverbal at 5s")
+
             # 2. Never spoke at all for 12s -> Encourage
             if not has_spoken and total_silence >= 12.0 and not encouraged:
                 encouraged = True
@@ -743,57 +794,74 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
 
     async def _transition_to_next(current_q_index: int) -> None:
         """Speak acknowledgment, then advance to the next question."""
-        # Guard: set phase to "transition" immediately (before any await) so that
-        # the fallback timer's while-loop exits and cannot race into a second call.
-        if session.get("current_phase") == "transition":
-            return  # Another transition is already in progress
-        dc = session.get("data_channel")
-        session["current_phase"] = "transition"
-        send_phase(dc, "transition", 0)
+        # Bug 4: Use a per-session lock so that concurrent callers
+        # (_check_advance + _answer_fallback_timer) cannot both enter the
+        # transition body.  The phase check inside the lock is still needed
+        # because the lock is reentrant across non-overlapping calls.
+        async with session["transition_lock"]:
+            # Guard: re-check phase inside the lock (TOCTOU safety)
+            if session.get("current_phase") not in ("answering", "transition"):
+                return
+            if session.get("current_phase") == "transition":
+                return  # Another transition already started
+            dc = session.get("data_channel")
+            session["current_phase"] = "transition"
+            send_phase(dc, "transition", 0)
 
-        # Cancel fallback timer if still running (but not if WE are the fallback timer)
-        current = asyncio.current_task()
-        ft = session.get("answer_fallback_task")
-        if ft and not ft.done() and ft is not current:
-            ft.cancel()
+            # Cancel fallback timer if still running (but not if WE are the fallback timer)
+            current = asyncio.current_task()
+            ft = session.get("answer_fallback_task")
+            if ft and not ft.done() and ft is not current:
+                ft.cancel()
 
-        # Wait for in-flight post_transcript to finish before transitioning.
-        # Skip if pt_task IS the current task (called from within _post_transcript_inner)
-        # to avoid a self-deadlock where the task waits for itself.
-        pt_task = session.get("post_transcript_task")
-        if pt_task and not pt_task.done() and pt_task is not current:
-            try:
-                await asyncio.wait_for(asyncio.shield(pt_task), timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning("post_transcript timed out during transition, proceeding")
-            except Exception:
-                pass
+            # Wait for in-flight post_transcript to finish before transitioning.
+            # Skip if pt_task IS the current task (called from within _post_transcript_inner)
+            # to avoid a self-deadlock where the task waits for itself.
+            pt_task = session.get("post_transcript_task")
+            if pt_task and not pt_task.done() and pt_task is not current:
+                try:
+                    await asyncio.wait_for(asyncio.shield(pt_task), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("post_transcript timed out during transition, proceeding")
+                except Exception:
+                    pass
 
-        # Reset probe count for the next question
-        session["current_q_probe_count"] = 0
+            # Reset probe count for the next question
+            session["current_q_probe_count"] = 0
 
-        # Feature 3: Acknowledgment phrase (skip on intro)
-        q_idx = int(session.get("interview_question_idx", 0))
-        if q_idx >= 1:  # Don't ack the intro (idx 0)
-            score = session.get("last_completeness_score", 0.0)
-            if score >= 0.75:
-                tone = "high"
-            elif score >= 0.45:
-                tone = "medium"
+            # Feature 3 / Gap 2: Mode-aware acknowledgment phrase (skip on intro)
+            q_idx = int(session.get("interview_question_idx", 0))
+            if q_idx >= 1:  # Don't ack the intro (idx 0)
+                last_mode = session.get("last_interviewer_mode", "")
+                # Use mode-specific pool if present and non-empty
+                mode_pool = MODE_ACKNOWLEDGMENTS.get(last_mode, None)
+                if mode_pool:
+                    ack_phrase = random.choice(mode_pool)
+                elif mode_pool is None:
+                    # Unknown mode — fall back to score-based bands
+                    score = session.get("last_completeness_score", 0.0)
+                    if score >= 0.75:
+                        ack_key = "ADVANCE_HIGH"
+                    elif score >= 0.45:
+                        ack_key = "ADVANCE_MED"
+                    else:
+                        ack_key = "ADVANCE_LOW"
+                    ack_phrase = random.choice(MODE_ACKNOWLEDGMENTS.get(ack_key, ACKNOWLEDGMENT_PHRASES["medium"]))
+                else:
+                    # mode_pool is empty list — skip acknowledgment (e.g. REDIRECT, RESCUE)
+                    ack_phrase = ""
+                if ack_phrase:
+                    voice_name = _get_voice_name(session, settings)
+                    send_status(dc, f"ack ({last_mode or 'score'}): {ack_phrase}")
+                    await _speak_session_text(session, dc, ack_phrase, send_status, voice=voice_name)
+                    await asyncio.sleep(0.4)  # 400ms pause after ack
+
+            next_idx = int(session.get("interview_question_idx", 0))
+            questions = session.get("question_bank", [])
+            if next_idx < len(questions):
+                await _start_question_flow(next_idx)
             else:
-                tone = "low"
-            ack_phrase = random.choice(ACKNOWLEDGMENT_PHRASES[tone])
-            voice_name = _get_voice_name(session, settings)
-            send_status(dc, f"ack ({tone}): {ack_phrase}")
-            await _speak_session_text(session, dc, ack_phrase, send_status, voice=voice_name)
-            await asyncio.sleep(0.4)  # 400ms pause after ack
-
-        next_idx = int(session.get("interview_question_idx", 0))
-        questions = session.get("question_bank", [])
-        if next_idx < len(questions):
-            await _start_question_flow(next_idx)
-        else:
-            await _end_interview()
+                await _end_interview()
 
     def _cancel_all_timers() -> None:
         """Cancel all running timer/monitor tasks (except the caller)."""
@@ -869,11 +937,10 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             logger.info("Ignoring noisy transcript (%d words): '%s'", word_count, transcript_text)
             return
 
-        # Guard: if another pipeline is already in-flight, just accumulate the
-        # transcript text and bail.  The running pipeline reads the accumulated
-        # current_answer_transcript, so the LLM will still see the full answer.
-        # This prevents concurrent pipelines from generating duplicate follow-ups
-        # (and double-incrementing the probe counter).
+        # Guard: if another pipeline is already in-flight, accumulate the
+        # transcript text AND stash the full result for a follow-up run after
+        # the current pipeline finishes (Bug 3: prevents dead-ends when a new
+        # speech segment arrives during scoring).
         if session.get("post_transcript_in_flight"):
             session["current_answer_transcript"] = (
                 session.get("current_answer_transcript", "") + " " + transcript_text
@@ -881,8 +948,12 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             session["current_q_transcripts"] = int(session.get("current_q_transcripts", 0)) + 1
             session["last_speech_time"] = time.perf_counter()
             session["silence_since_last_speech"] = time.perf_counter()
+            # Stash latest pending — overwrite any prior stash so we always
+            # re-process the most-recent segment after the current run ends.
+            session["_pending_inflight_result"] = result
+            session["_pending_inflight_audio"] = audio_chunk
             logger.info(
-                "Pipeline in-flight, accumulated transcript (%d segments): '%s'",
+                "Pipeline in-flight, stashed pending transcript (%d segments): '%s'",
                 session.get("current_q_transcripts", 0),
                 transcript_text[:60],
             )
@@ -894,6 +965,12 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             await _post_transcript_inner(result, audio_chunk)
         finally:
             session["post_transcript_in_flight"] = False
+            # Bug 3: if a new segment arrived while we were running, process it now
+            pending_result = session.pop("_pending_inflight_result", None)
+            pending_audio = session.pop("_pending_inflight_audio", None)
+            if pending_result is not None and session.get("current_phase") == "answering":
+                logger.info("Re-triggering pipeline for pending transcript segment")
+                asyncio.ensure_future(_post_transcript(pending_result, pending_audio))
 
     async def _post_transcript_inner(result, audio_chunk):
         """Inner implementation of post_transcript (wrapped by in-flight guard)."""
@@ -979,6 +1056,7 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
                 "mediapipe_bpm": blinks_per_min,
                 "action_units": [],
                 "emotion_timeline": [],
+                "question_subtype": session.get("current_question_subtype", "unknown"),
             }
             interview_scores = interview_scorer.evaluate_session(telemetry)
 
@@ -1091,6 +1169,9 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             mode = str(turn_result.get("mode") or "PROBE_GAP")
             spoken = str(turn_result.get("spoken_response") or "")
 
+            # Gap 2: Record the current mode for use in _transition_to_next ack
+            session["last_interviewer_mode"] = mode
+
             # Track probes per question — cap at 2, then force ADVANCE
             probe_count = session.get("current_q_probe_count", 0)
             PROBE_MODES = {"PROBE_DEPTH", "PROBE_GAP", "CHALLENGE", "REDIRECT", "RESCUE", "CONFRONT", "REFRAME"}
@@ -1114,6 +1195,8 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
                     send_phase(dc, "speaking", 0)
                     voice_name = _get_voice_name(session, settings)
                     send_status(dc, f"speaking follow-up ({mode})")
+                    # Gap 1: Human-like thinking pause before probe TTS (0.6–1.2s)
+                    await asyncio.sleep(random.uniform(0.6, 1.2))
                     await _speak_session_text(session, dc, spoken, send_status, voice=voice_name)
                     # Update current_question to the probe text so the next answer
                     # is evaluated in the context of this follow-up, not the original Q.
@@ -1195,6 +1278,9 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
                 session["fallback_timer_epoch"] = new_epoch
 
                 # STEP 3: Now safe to reset answer state and set phase to answering.
+                # Bug 1: drain VAD hardware buffer tail before re-enabling speech detection
+                session["speaking"] = False
+                await asyncio.sleep(0.30)
                 session["current_phase"] = "answering"
                 send_phase(dc, "answering", 0)
                 session["current_q_transcripts"] = 0
@@ -1204,6 +1290,8 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
                 session["silence_since_last_speech"] = None
                 session["last_speech_time"] = time.perf_counter()
                 session["post_transcript_in_flight"] = False
+                session["is_probe_cycle"] = True     # Bug 2: stricter silence after probes
+                session["soft_prompt_sent"] = False  # Gap 5: re-arm for re-answer
 
                 # STEP 4: Start fresh fallback timer with the new epoch.
                 q_idx = max(-1, int(session.get("interview_question_idx", 1)) - 1)
