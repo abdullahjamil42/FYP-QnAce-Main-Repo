@@ -415,10 +415,10 @@ export default function PracticePage() {
 
   return (
     <AppShell
-      title="Preparation Module"
-      subtitle="Pick a topic, attempt MCQs, and track your learning progress with end-of-quiz feedback."
+      title="Prepare and Practice"
+      subtitle="Pick a topic, Access Notes, attempt MCQs, and track your learning progress feedback."
       actions={
-        <Link href="/session/live" className="rounded-full bg-qace-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-400">
+        <Link href="/session/live" className="rounded-full border border-gray-700/50 bg-blue-600 backdrop-blur-sm px-5 py-2.5 text-sm font-semibold text-gray-300 transition hover:bg-gray-700/60 hover:text-white">
           Start Full Mock
         </Link>
       }

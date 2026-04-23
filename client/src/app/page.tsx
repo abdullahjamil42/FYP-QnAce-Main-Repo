@@ -299,9 +299,11 @@ export default function LandingPage() {
             <Link href="/setup" className="rounded-full bg-qace-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-400">
               Continue
             </Link>
-            <Link href="/login" className="rounded-full border border-white/25 bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15">
-              Login
-            </Link>
+            {!user && (
+              <Link href="/login" className="rounded-full border border-white/25 bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15">
+                Login
+              </Link>
+            )}
           </div>
         </div>
       </section>
