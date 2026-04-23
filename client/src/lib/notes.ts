@@ -2,28 +2,54 @@ import { getSupabaseClient } from "./supabase";
 
 const BUCKET = "Notes";
 
-/** Strip file extension only → use as display label (keeps "2. programming" etc.). */
+/** Strip file extension only → use as display label. */
 function toLabel(name: string): string {
   return name.replace(/\.[^/.]+$/, "").trim();
 }
 
+/** Natural / numeric-aware sort comparator (handles "10. Foo" > "2. Bar" correctly). */
+function naturalCompare(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
+
 /**
- * Returns the list of note files that actually exist in the bucket.
- * Tries the SDK list API first (requires SELECT policy on storage.objects).
- * Falls back to probing public URLs for all known filename patterns.
+ * Lists folders (topic groups) in the bucket root.
+ * Supabase returns folders as items without an extension and with metadata === null.
  */
-export async function listNoteTopics(): Promise<{ file: string; label: string }[]> {
+export async function listNoteFolders(): Promise<{ folder: string; label: string }[]> {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
-  // Primary: SDK list (works if Supabase storage SELECT policy is set)
   const { data } = await supabase.storage.from(BUCKET).list("", { limit: 200 });
-  // Filter FIRST — Supabase auto-inserts a `.emptyFolderPlaceholder` sentinel file,
-  // which would make data.length > 0 true while yielding zero real files.
-  const realFiles = (data ?? []).filter((f) => /\.(md|txt)$/i.test(f.name));
-  return realFiles
-    .map((f) => ({ file: f.name, label: toLabel(f.name) }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const folders = (data ?? []).filter(
+    (f) => !f.name.startsWith(".") && !/\.[a-z0-9]+$/i.test(f.name)
+  );
+  if (folders.length === 0) {
+    // Fallback: no folders found — treat root .md/.txt files as flat topics
+    const files = (data ?? []).filter((f) => /\.(md|txt)$/i.test(f.name));
+    return files
+      .map((f) => ({ folder: f.name, label: toLabel(f.name) }))
+      .sort((a, b) => naturalCompare(a.label, b.label));
+  }
+  return folders
+    .map((f) => ({ folder: f.name, label: f.name }))
+    .sort((a, b) => naturalCompare(a.label, b.label));
+}
+
+/**
+ * Lists .md/.txt files inside a specific folder in the bucket.
+ */
+export async function listFolderFiles(
+  folder: string
+): Promise<{ path: string; label: string }[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
+
+  const { data } = await supabase.storage.from(BUCKET).list(folder, { limit: 200 });
+  const files = (data ?? []).filter((f) => /\.(md|txt)$/i.test(f.name));
+  return files
+    .map((f) => ({ path: `${folder}/${f.name}`, label: toLabel(f.name) }))
+    .sort((a, b) => naturalCompare(a.label, b.label));
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +121,88 @@ function isCodeishLine(line: string): boolean {
  * emoji callouts, and bold inline labels.
  */
 export function preprocessNoteContent(raw: string): string {
+  // Pre-pass: remove stray bare ``` lines that appear before non-code content.
+  // A bare ``` is "stray" when it opens a fence but the next non-blank line is
+  // clearly prose/markdown (heading, blockquote, bold, emoji callout, etc.).
+  // Such orphaned fences cause everything up to the next real ``` to render as
+  // a code block, swallowing headings and formatted text.
+  {
+    const preLines = raw.split("\n");
+    const cleaned: string[] = [];
+    let insideFence = false;
+    let fenceHasLanguage = false;
+    for (let j = 0; j < preLines.length; j++) {
+      const t = preLines[j].trim();
+      if (insideFence) {
+        cleaned.push(preLines[j]);
+        if (t === "```") insideFence = false; // close the fence
+        continue;
+      }
+      // Detect a fence opener
+      if (t.startsWith("```")) {
+        const lang = t.slice(3).trim();
+        if (lang) {
+          // Named fence (```python etc.) — always keep
+          insideFence = true;
+          fenceHasLanguage = true;
+          cleaned.push(preLines[j]);
+          continue;
+        }
+        // Bare ``` — check what follows
+        const nxt = findNextNonBlank(preLines, j + 1);
+        if (nxt === null) {
+          // Nothing follows — skip orphan
+          continue;
+        }
+        const nxtTrim = preLines[nxt].trim();
+        const isProseNext =
+          nxtTrim.startsWith("#") ||
+          nxtTrim.startsWith(">") ||
+          nxtTrim.startsWith("- **") ||
+          /^[⚠💡📌🔍\u26a0]/.test(nxtTrim) ||
+          nxtTrim.startsWith("**") ||
+          nxtTrim.startsWith("Deep Dive:") ||
+          (!isCodeishLine(preLines[nxt]) && /^[A-Z]/.test(nxtTrim) && nxtTrim.length > 20);
+        if (isProseNext) {
+          continue; // drop the stray fence
+        }
+        // Bare fence before actual code — keep and track
+        insideFence = true;
+        fenceHasLanguage = false;
+        cleaned.push(preLines[j]);
+        continue;
+      }
+      cleaned.push(preLines[j]);
+    }
+    raw = cleaned.join("\n");
+  }
+
+  // Preamble strip: remove lines that appear BEFORE the first ## heading and
+  // just repeat the file title (numbered title line or a bare short topic name).
+  // These are already displayed as the <h2> label outside the markdown renderer.
+  {
+    const pLines = raw.split("\n");
+    const firstH2Idx = pLines.findIndex((l) => /^##\s/.test(l.trim()));
+    if (firstH2Idx > 0) {
+      const preamble = pLines.slice(0, firstH2Idx);
+      const filteredPreamble = preamble.filter((l) => {
+        const t = l.trim();
+        if (!t) return false;                         // blank lines
+        if (/^\d+\./.test(t)) return false;           // "4. Network Layer"
+        // Short standalone title-case line (same as file topic label)
+        if (
+          t.length <= 80 &&
+          /^[A-Z]/.test(t) &&
+          !/[.,;?!]$/.test(t) &&
+          !t.includes(". ") &&
+          !/^(The |A |An |In |On |By |If |When |For |To |This |With )/.test(t)
+        ) return false;
+        return true; // keep real prose paragraphs
+      });
+      raw = filteredPreamble.join("\n") + "\n" + pLines.slice(firstH2Idx).join("\n");
+    }
+  }
+
   const lines = raw.split("\n");
   const out: string[] = [];
   let i = 0;
@@ -219,7 +327,22 @@ export function preprocessNoteContent(raw: string): string {
     i++;
   }
 
-  return out.join("\n");
+  // Post-pass: deduplicate headings with identical text.
+  // Normalise by stripping "#+ " prefix and any leading "N. " number prefix,
+  // then lower-case. If the same heading was already output, skip it.
+  const seenHeadings = new Set<string>();
+  const deduped: string[] = [];
+  for (const l of out) {
+    const hm = /^(#{1,6})\s+(.+)$/.exec(l);
+    if (hm) {
+      const normalised = hm[2].replace(/^\d+\.\s+/, "").toLowerCase().trim();
+      if (seenHeadings.has(normalised)) continue;
+      seenHeadings.add(normalised);
+    }
+    deduped.push(l);
+  }
+
+  return deduped.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -287,12 +410,12 @@ export function parseNoteSections(content: string): NoteSection[] {
   });
 }
 
-/** Fetches content for a bucket filename (e.g. "2. programming.txt") via public URL. */
-export async function getNoteByFile(file: string): Promise<string | null> {
+/** Fetches content for a bucket path (e.g. "Computer Networks/1. Data Communication.txt") via public URL. */
+export async function getNoteByFile(path: string): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
-  const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(file);
+  const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
   try {
     const res = await fetch(publicUrl);
     if (!res.ok) return null;

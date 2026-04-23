@@ -16,7 +16,7 @@ import {
   type MCQAttemptRecord,
   type MCQTopicProgress,
 } from "@/lib/mcq-progress-store";
-import { listNoteTopics, getNoteByFile, parseNoteSections, preprocessNoteContent, type NoteSection } from "@/lib/notes";
+import { listNoteFolders, listFolderFiles, getNoteByFile, preprocessNoteContent, type NoteSection } from "@/lib/notes";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -168,8 +168,11 @@ export default function PracticePage() {
 
   // Notes state
   const [user, setUser] = useState<User | null>(null);
-  const [bucketTopics, setBucketTopics] = useState<{ file: string; label: string }[]>([]);
+  const [bucketTopics, setBucketTopics] = useState<{ folder: string; label: string }[]>([]);
   const [bucketTopicsLoading, setBucketTopicsLoading] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [folderFiles, setFolderFiles] = useState<{ path: string; label: string }[]>([]);
+  const [folderFilesLoading, setFolderFilesLoading] = useState(false);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loadingNotes, setLoadingNotes] = useState<Record<string, boolean>>({});
   const [selectedStudyTopic, setSelectedStudyTopic] = useState<string | null>(null);
@@ -263,29 +266,39 @@ export default function PracticePage() {
   }, [supabase]);
 
 
-  const handleSelectStudyTopic = async (file: string, label: string) => {
-    setSelectedStudyTopic(file);
-    setSelectedSectionIdx(0);
-    if (notes[file]) {
-      setParsedSections(parseNoteSections(notes[file]));
-      return;
-    }
-    setLoadingNotes((prev) => ({ ...prev, [file]: true }));
-    const note = await getNoteByFile(file);
-    if (note) {
-      setNotes((prev) => ({ ...prev, [file]: note }));
-      setParsedSections(parseNoteSections(note));
-    }
-    setLoadingNotes((prev) => ({ ...prev, [file]: false }));
+  const handleSelectFolder = async (folder: string) => {
+    if (selectedFolder === folder) return;
+    setSelectedFolder(folder);
+    setSelectedStudyTopic(null);
+    setParsedSections([]);
+    setFolderFiles([]);
+    setFolderFilesLoading(true);
+    const files = await listFolderFiles(folder);
+    setFolderFiles(files);
+    setFolderFilesLoading(false);
+    // Auto-select first file
+    if (files.length > 0) void handleSelectStudyTopic(files[0].path);
   };
 
-  // Load bucket topic list when entering study mode
+  const handleSelectStudyTopic = async (path: string) => {
+    setSelectedStudyTopic(path);
+    setSelectedSectionIdx(0);
+    if (notes[path]) return;
+    setLoadingNotes((prev) => ({ ...prev, [path]: true }));
+    const note = await getNoteByFile(path);
+    if (note) setNotes((prev) => ({ ...prev, [path]: note }));
+    setLoadingNotes((prev) => ({ ...prev, [path]: false }));
+  };
+
+  // Load bucket folders when entering study mode
   useEffect(() => {
     if (mode === "study" && bucketTopics.length === 0) {
       setBucketTopicsLoading(true);
-      void listNoteTopics().then((topics) => {
+      void listNoteFolders().then((topics) => {
         setBucketTopics(topics);
         setBucketTopicsLoading(false);
+        // Auto-select first folder
+        if (topics.length > 0) void handleSelectFolder(topics[0].folder);
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -703,7 +716,7 @@ export default function PracticePage() {
 
       {mode === "study" ? (
         <div className="flex flex-col" style={{ minHeight: "70vh" }}>
-          {/* Topic pill bar — same style as top navbar pill */}
+          {/* Folder (topic) pill bar */}
           <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl px-4 py-3 flex gap-2 overflow-x-auto mb-4">
             {bucketTopicsLoading
               ? [...Array(4)].map((_, i) => <div key={i} className="h-8 w-36 bg-gray-700 rounded-full animate-pulse shrink-0" />)
@@ -711,10 +724,10 @@ export default function PracticePage() {
               ? <p className="text-gray-500 text-sm self-center">No notes available.</p>
               : bucketTopics.map((t) => (
                   <button
-                    key={t.file}
-                    onClick={() => void handleSelectStudyTopic(t.file, t.label)}
+                    key={t.folder}
+                    onClick={() => void handleSelectFolder(t.folder)}
                     className={`px-5 py-2 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-all ${
-                      selectedStudyTopic === t.file
+                      selectedFolder === t.folder
                         ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
                         : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/60"
                     }`}
@@ -722,85 +735,90 @@ export default function PracticePage() {
                 ))}
           </div>
 
-          {/* Main content: sidebar + notes — width constrained to topic bar */}
-          {selectedStudyTopic && loadingNotes[selectedStudyTopic] ? (
+          {/* Sidebar + content */}
+          {folderFilesLoading ? (
             <div className="flex justify-center items-center h-64">
               <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : selectedStudyTopic && notes[selectedStudyTopic] ? (
-            parsedSections.length > 0 ? (
-              <div className="flex gap-4 items-start flex-1 min-h-0">
-                {/* Sub-topic sidebar — dark, same opacity/theme as topic bar */}
-                <div className="w-56 shrink-0 sticky top-4">
-                  <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl overflow-hidden">
-                    <div className="px-4 py-3 border-b border-gray-700/50">
-                      <h3 className="text-gray-300 font-semibold text-xs uppercase tracking-widest">Sub-Topics</h3>
-                    </div>
-                    <nav className="py-1 max-h-[72vh] overflow-y-auto">
-                      {parsedSections.map((section, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => setSelectedSectionIdx(idx)}
-                          className={`w-full text-left px-4 py-2.5 text-sm transition-all border-l-2 ${
-                            selectedSectionIdx === idx
-                              ? "bg-blue-600/20 text-blue-400 font-semibold border-blue-500"
-                              : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/40 border-transparent"
-                          }`}
-                        >
-                          {section.title}
-                        </button>
-                      ))}
-                    </nav>
+          ) : folderFiles.length > 0 ? (
+            <div className="flex gap-4 items-start flex-1 min-h-0">
+              {/* Sub-topic sidebar — each file in the folder */}
+              <div className="w-56 shrink-0 sticky top-4">
+                <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-700/50">
+                    <h3 className="text-gray-300 font-semibold text-xs uppercase tracking-widest">Sub-Topics</h3>
                   </div>
+                  <nav className="py-1 max-h-[72vh] overflow-y-auto">
+                    {folderFiles.map((f, idx) => (
+                      <button
+                        key={f.path}
+                        onClick={() => void handleSelectStudyTopic(f.path)}
+                        className={`w-full text-left px-4 py-2.5 text-sm transition-all border-l-2 ${
+                          selectedStudyTopic === f.path
+                            ? "bg-blue-600/20 text-blue-400 font-semibold border-blue-500"
+                            : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/40 border-transparent"
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </nav>
                 </div>
+              </div>
 
-                {/* Section content */}
-                <div className="flex-1 min-w-0 flex flex-col gap-4">
-                  <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-10 py-8">
-                    <h2 className="text-2xl font-extrabold text-blue-700 mb-6 pb-3 border-b-2 border-blue-100 tracking-tight">
-                      {parsedSections[selectedSectionIdx]?.title ?? ""}
-                    </h2>
-                    <div className="space-y-0">
+              {/* Note content */}
+              <div className="flex-1 min-w-0 flex flex-col gap-4">
+                {selectedStudyTopic && loadingNotes[selectedStudyTopic] ? (
+                  <div className="flex justify-center items-center h-64">
+                    <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : selectedStudyTopic && notes[selectedStudyTopic] ? (
+                  <>
+                    <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-10 py-8">
+                      <h2 className="text-2xl font-extrabold text-blue-700 mb-6 pb-3 border-b-2 border-blue-100 tracking-tight">
+                        {folderFiles.find((f) => f.path === selectedStudyTopic)?.label ?? ""}
+                      </h2>
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                        {preprocessNoteContent(parsedSections[selectedSectionIdx]?.content ?? "")}
+                        {preprocessNoteContent(notes[selectedStudyTopic])}
                       </ReactMarkdown>
                     </div>
+                    {/* Prev / Next navigation */}
+                    <div className="flex justify-between">
+                      <button
+                        disabled={folderFiles.findIndex((f) => f.path === selectedStudyTopic) === 0}
+                        onClick={() => {
+                          const idx = folderFiles.findIndex((f) => f.path === selectedStudyTopic);
+                          if (idx > 0) void handleSelectStudyTopic(folderFiles[idx - 1].path);
+                        }}
+                        className="px-4 py-2 rounded-full bg-gray-800/60 border border-gray-700/40 text-gray-300 text-sm font-medium disabled:opacity-30 hover:bg-gray-700/60 transition-all"
+                      >
+                        ← Previous
+                      </button>
+                      <span className="text-gray-500 text-sm self-center">
+                        {folderFiles.findIndex((f) => f.path === selectedStudyTopic) + 1} / {folderFiles.length}
+                      </span>
+                      <button
+                        disabled={folderFiles.findIndex((f) => f.path === selectedStudyTopic) === folderFiles.length - 1}
+                        onClick={() => {
+                          const idx = folderFiles.findIndex((f) => f.path === selectedStudyTopic);
+                          if (idx < folderFiles.length - 1) void handleSelectStudyTopic(folderFiles[idx + 1].path);
+                        }}
+                        className="px-4 py-2 rounded-full bg-gray-800/60 border border-gray-700/40 text-gray-300 text-sm font-medium disabled:opacity-30 hover:bg-gray-700/60 transition-all"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
+                    <p className="text-gray-400 text-lg">Select a sub-topic from the sidebar.</p>
                   </div>
-                  {/* Prev / Next navigation */}
-                  <div className="flex justify-between">
-                    <button
-                      disabled={selectedSectionIdx === 0}
-                      onClick={() => setSelectedSectionIdx((i) => Math.max(0, i - 1))}
-                      className="px-4 py-2 rounded-full bg-gray-800/60 border border-gray-700/40 text-gray-300 text-sm font-medium disabled:opacity-30 hover:bg-gray-700/60 transition-all"
-                    >
-                      ← Previous
-                    </button>
-                    <span className="text-gray-500 text-sm self-center">
-                      {selectedSectionIdx + 1} / {parsedSections.length}
-                    </span>
-                    <button
-                      disabled={selectedSectionIdx === parsedSections.length - 1}
-                      onClick={() => setSelectedSectionIdx((i) => Math.min(parsedSections.length - 1, i + 1))}
-                      className="px-4 py-2 rounded-full bg-gray-800/60 border border-gray-700/40 text-gray-300 text-sm font-medium disabled:opacity-30 hover:bg-gray-700/60 transition-all"
-                    >
-                      Next →
-                    </button>
-                  </div>
-                </div>
+                )}
               </div>
-            ) : (
-              /* Fallback: full content without sections */
-              <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-12 py-10">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                  {preprocessNoteContent(notes[selectedStudyTopic])}
-                </ReactMarkdown>
-              </div>
-            )
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
-              {!selectedStudyTopic
-                ? <p className="text-gray-400 text-lg">Select a topic above to start studying.</p>
-                : <p className="text-gray-500">Notes not available for this topic.</p>}
+              <p className="text-gray-400 text-lg">Select a topic above to start studying.</p>
             </div>
           )}
         </div>
