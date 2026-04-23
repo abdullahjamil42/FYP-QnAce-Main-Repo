@@ -717,19 +717,19 @@ export default function PracticePage() {
       {mode === "study" ? (
         <div className="flex flex-col" style={{ minHeight: "70vh" }}>
           {/* Folder (topic) pill bar */}
-          <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl px-4 py-3 flex gap-2 overflow-x-auto mb-4">
+          <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl px-4 py-3 grid grid-cols-5 gap-2 mb-4">
             {bucketTopicsLoading
-              ? [...Array(4)].map((_, i) => <div key={i} className="h-8 w-36 bg-gray-700 rounded-full animate-pulse shrink-0" />)
+              ? [...Array(10)].map((_, i) => <div key={i} className="h-9 bg-gray-700 rounded-lg animate-pulse" />)
               : bucketTopics.length === 0
-              ? <p className="text-gray-500 text-sm self-center">No notes available.</p>
+              ? <p className="text-gray-500 text-sm col-span-5 text-center">No notes available.</p>
               : bucketTopics.map((t) => (
                   <button
                     key={t.folder}
                     onClick={() => void handleSelectFolder(t.folder)}
-                    className={`px-5 py-2 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-all ${
+                    className={`h-9 rounded-lg text-xs font-medium text-center transition-all px-2 leading-tight ${
                       selectedFolder === t.folder
                         ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                        : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/60"
+                        : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/60 bg-gray-700/30"
                     }`}
                   >{t.label}</button>
                 ))}
