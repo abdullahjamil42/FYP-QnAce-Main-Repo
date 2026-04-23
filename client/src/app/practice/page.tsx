@@ -748,7 +748,7 @@ export default function PracticePage() {
                   <div className="px-4 py-3 border-b border-gray-700/50">
                     <h3 className="text-gray-300 font-semibold text-xs uppercase tracking-widest">Sub-Topics</h3>
                   </div>
-                  <nav className="py-1 max-h-[72vh] overflow-y-auto">
+                  <nav className="py-1">
                     {folderFiles.map((f, idx) => (
                       <button
                         key={f.path}
