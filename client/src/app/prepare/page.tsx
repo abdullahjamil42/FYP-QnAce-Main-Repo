@@ -40,7 +40,7 @@ export default function PreparePage() {
   const [notes, setNotes] = useState<Record<string, Note>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
-  const [mode, setMode] = useState<"quiz" | "notes" | "study">("quiz");
+  const [mode, setMode] = useState<"quiz" | "notes" | "study">("study");
 
   // Study Notes state
   const [topicNotes, setTopicNotes] = useState<TopicNote[]>([]);
@@ -194,58 +194,62 @@ export default function PreparePage() {
       </div>
 
       {mode === "study" ? (
-        <div className="flex flex-col flex-1 overflow-hidden">
-          {/* Topic categories top bar */}
-          <div className="bg-gray-800 border-b border-gray-700 px-6 py-3 flex gap-2 overflow-x-auto shrink-0">
-            {topicNotesLoading
-              ? [...Array(5)].map((_, i) => <div key={i} className="h-8 w-32 bg-gray-700 rounded-full animate-pulse shrink-0" />)
-              : categories.length === 0
-              ? <p className="text-gray-500 text-sm self-center">No topics available.</p>
-              : categories.map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => { setSelectedCategory(cat); setSelectedStudyTopic(null); setStudyContent(null); }}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors shrink-0 ${selectedCategory === cat ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
-                  >{cat}</button>
-                ))}
+        <div className="flex flex-col flex-1 overflow-hidden px-6 pb-6">
+          {/* Topic categories pill bar — same style as mode toggle */}
+          <div className="flex justify-center pt-2 pb-2 shrink-0">
+            <div className="bg-gray-800 rounded-full p-1 flex gap-1 overflow-x-auto max-w-full">
+              {topicNotesLoading
+                ? [...Array(5)].map((_, i) => <div key={i} className="h-8 w-28 bg-gray-700 rounded-full animate-pulse shrink-0" />)
+                : categories.length === 0
+                ? <p className="text-gray-500 text-sm self-center px-4">No topics available.</p>
+                : categories.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => { setSelectedCategory(cat); setSelectedStudyTopic(null); setStudyContent(null); }}
+                      className={`px-5 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors shrink-0 ${selectedCategory === cat ? "bg-blue-600 text-white" : "bg-transparent text-gray-400 hover:bg-gray-700"}`}
+                    >{cat}</button>
+                  ))}
+            </div>
           </div>
 
-          {/* Subtopics row */}
-          {selectedCategory && (
-            <div className="px-6 py-2.5 flex gap-2 overflow-x-auto shrink-0 bg-gray-900 border-b border-gray-700">
-              {subtopics.map((t) => (
-                <button
-                  key={t.topic_id}
-                  onClick={() => fetchStudyContent(t.topic_id)}
-                  className={`px-4 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors shrink-0 border ${selectedStudyTopic === t.topic_id ? "bg-blue-500 text-white border-blue-500 font-semibold" : "bg-gray-800 text-gray-300 border-gray-600 hover:border-blue-400 hover:text-blue-300"}`}
-                >{t.title}</button>
-              ))}
-            </div>
-          )}
-
-          {/* PDF content area */}
-          <div className="flex-1 overflow-y-auto p-8">
-            {studyContentLoading ? (
-              <div className="flex justify-center items-center h-64">
-                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          {/* Subtopics pill row — same pill theme/opacity as categories */}
+          <div className="flex justify-center pb-2 shrink-0 min-h-[44px]">
+            {selectedCategory && (
+              <div className="bg-gray-800 rounded-full p-1 flex gap-1 overflow-x-auto max-w-full">
+                {subtopics.map((t) => (
+                  <button
+                    key={t.topic_id}
+                    onClick={() => fetchStudyContent(t.topic_id)}
+                    className={`px-5 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors shrink-0 ${selectedStudyTopic === t.topic_id ? "bg-blue-600 text-white" : "bg-transparent text-gray-400 hover:bg-gray-700"}`}
+                  >{t.title}</button>
+                ))}
               </div>
-            ) : studyContent ? (
-              <div className="max-w-4xl mx-auto">
-                <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-16 py-12">
+            )}
+          </div>
+
+          {/* Notes content — fills remaining height, constrained to topic selector width */}
+          <div className="flex-1 overflow-y-auto flex justify-center">
+            <div className="w-full">
+              {studyContentLoading ? (
+                <div className="flex justify-center items-center h-64">
+                  <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : studyContent ? (
+                <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-16 py-12 h-full">
                   <article className="prose prose-slate max-w-none prose-headings:font-bold prose-headings:text-gray-900 prose-h1:text-3xl prose-h1:pb-3 prose-h1:mb-6 prose-h1:border-b prose-h1:border-gray-200 prose-h2:text-2xl prose-h2:mt-8 prose-h3:text-lg prose-h3:text-blue-700 prose-p:text-gray-700 prose-p:leading-relaxed prose-li:text-gray-700 prose-strong:text-gray-900 prose-code:bg-gray-100 prose-code:text-blue-700 prose-code:rounded prose-code:text-sm prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:rounded-xl prose-blockquote:border-blue-400 prose-blockquote:text-gray-500">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{studyContent}</ReactMarkdown>
                   </article>
                 </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-                {!selectedCategory
-                  ? <p className="text-gray-400 text-lg">Select a topic from the top bar to get started.</p>
-                  : !selectedStudyTopic
-                  ? <p className="text-gray-400 text-lg">Choose a subtopic to open its notes.</p>
-                  : <p className="text-gray-500">Failed to load content. Please try again.</p>}
-              </div>
-            )}
+              ) : (
+                <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
+                  {!selectedCategory
+                    ? <p className="text-gray-400 text-lg">Select a topic from the bar above to get started.</p>
+                    : !selectedStudyTopic
+                    ? <p className="text-gray-400 text-lg">Choose a subtopic to open its notes.</p>
+                    : <p className="text-gray-500">Failed to load content. Please try again.</p>}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       ) : (

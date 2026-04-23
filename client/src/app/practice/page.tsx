@@ -145,7 +145,7 @@ type CatalogSubtopic = {
 
 export default function PracticePage() {
   const supabase = getSupabaseClient();
-  const [mode, setMode] = useState<"quiz" | "study">("quiz");
+  const [mode, setMode] = useState<"quiz" | "study">("study");
   const [quizState, setQuizState] = useState<QuizState>("topic-selection");
   const [activeTopicId, setActiveTopicId] = useState<string>("technical");
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -410,27 +410,27 @@ export default function PracticePage() {
         </Link>
       }
     >
-      <div className="flex justify-center mb-8">
-        <div className="bg-gray-800 rounded-full p-1 flex">
-          <button
-            onClick={() => setMode("quiz")}
-            className={`px-6 py-2 rounded-full text-sm font-semibold ${
-              mode === "quiz"
-                ? "bg-blue-600 text-white"
-                : "bg-transparent text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            Quiz Catalog
-          </button>
+      <div className="flex justify-center mb-6">
+        <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/50 rounded-full p-1 flex gap-1">
           <button
             onClick={() => setMode("study")}
-            className={`px-6 py-2 rounded-full text-sm font-semibold ${
+            className={`px-6 py-2 rounded-full text-sm font-semibold transition-all ${
               mode === "study"
-                ? "bg-blue-600 text-white"
-                : "bg-transparent text-gray-400 hover:bg-gray-700"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/60"
             }`}
           >
             Study Notes
+          </button>
+          <button
+            onClick={() => setMode("quiz")}
+            className={`px-6 py-2 rounded-full text-sm font-semibold transition-all ${
+              mode === "quiz"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/60"
+            }`}
+          >
+            Quiz Catalog
           </button>
         </div>
       </div>
@@ -702,112 +702,107 @@ export default function PracticePage() {
 
 
       {mode === "study" ? (
-        <div className="-mx-4 flex flex-col" style={{ minHeight: "60vh" }}>
-          {/* Topics row */}
-          <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex gap-2 overflow-x-auto">
+        <div className="flex flex-col" style={{ minHeight: "70vh" }}>
+          {/* Topic pill bar — same style as top navbar pill */}
+          <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl px-4 py-3 flex gap-2 overflow-x-auto mb-4">
             {bucketTopicsLoading
-              ? [...Array(3)].map((_, i) => <div key={i} className="h-8 w-32 bg-gray-700 rounded-full animate-pulse shrink-0" />)
+              ? [...Array(4)].map((_, i) => <div key={i} className="h-8 w-36 bg-gray-700 rounded-full animate-pulse shrink-0" />)
               : bucketTopics.length === 0
               ? <p className="text-gray-500 text-sm self-center">No notes available.</p>
               : bucketTopics.map((t) => (
                   <button
                     key={t.file}
                     onClick={() => void handleSelectStudyTopic(t.file, t.label)}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-colors ${
-                      selectedStudyTopic === t.file ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                    className={`px-5 py-2 rounded-full text-sm font-medium whitespace-nowrap shrink-0 transition-all ${
+                      selectedStudyTopic === t.file
+                        ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                        : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/60"
                     }`}
                   >{t.label}</button>
                 ))}
           </div>
 
-          {/* Content area */}
-          <div className="flex-1 overflow-y-auto p-6">
-            {selectedStudyTopic && loadingNotes[selectedStudyTopic] ? (
-              <div className="flex justify-center items-center h-64">
-                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : selectedStudyTopic && notes[selectedStudyTopic] ? (
-              parsedSections.length > 0 ? (
-                /* Sub-topic layout: sidebar + content */
-                <div className="max-w-6xl mx-auto flex gap-6 items-start">
-                  {/* Sub-topic sidebar */}
-                  <div className="w-64 shrink-0 sticky top-4">
-                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-                      <div className="bg-blue-600 px-4 py-3">
-                        <h3 className="text-white font-semibold text-sm uppercase tracking-wide">Sub-Topics</h3>
-                      </div>
-                      <nav className="py-1 max-h-[70vh] overflow-y-auto">
-                        {parsedSections.map((section, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => setSelectedSectionIdx(idx)}
-                            className={`w-full text-left px-4 py-2.5 text-sm transition-colors border-l-4 ${
-                              selectedSectionIdx === idx
-                                ? "bg-blue-50 text-blue-700 font-semibold border-blue-600"
-                                : "text-gray-700 hover:bg-gray-50 border-transparent"
-                            }`}
-                          >
-                            {section.title}
-                          </button>
-                        ))}
-                      </nav>
+          {/* Main content: sidebar + notes — width constrained to topic bar */}
+          {selectedStudyTopic && loadingNotes[selectedStudyTopic] ? (
+            <div className="flex justify-center items-center h-64">
+              <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : selectedStudyTopic && notes[selectedStudyTopic] ? (
+            parsedSections.length > 0 ? (
+              <div className="flex gap-4 items-start flex-1 min-h-0">
+                {/* Sub-topic sidebar — dark, same opacity/theme as topic bar */}
+                <div className="w-56 shrink-0 sticky top-4">
+                  <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-700/50">
+                      <h3 className="text-gray-300 font-semibold text-xs uppercase tracking-widest">Sub-Topics</h3>
                     </div>
-                  </div>
-
-                  {/* Section content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-10 py-8">
-                      <h2 className="text-2xl font-extrabold text-blue-700 mb-6 pb-3 border-b-2 border-blue-100 tracking-tight">
-                        {parsedSections[selectedSectionIdx]?.title ?? ""}
-                      </h2>
-                      <div className="space-y-0">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                          {preprocessNoteContent(parsedSections[selectedSectionIdx]?.content ?? "")}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                    {/* Prev / Next navigation */}
-                    <div className="flex justify-between mt-4">
-                      <button
-                        disabled={selectedSectionIdx === 0}
-                        onClick={() => setSelectedSectionIdx((i) => Math.max(0, i - 1))}
-                        className="px-4 py-2 rounded-lg bg-gray-700 text-gray-200 text-sm font-medium disabled:opacity-30 hover:bg-gray-600 transition-colors"
-                      >
-                        ← Previous
-                      </button>
-                      <span className="text-gray-500 text-sm self-center">
-                        {selectedSectionIdx + 1} / {parsedSections.length}
-                      </span>
-                      <button
-                        disabled={selectedSectionIdx === parsedSections.length - 1}
-                        onClick={() => setSelectedSectionIdx((i) => Math.min(parsedSections.length - 1, i + 1))}
-                        className="px-4 py-2 rounded-lg bg-gray-700 text-gray-200 text-sm font-medium disabled:opacity-30 hover:bg-gray-600 transition-colors"
-                      >
-                        Next →
-                      </button>
-                    </div>
+                    <nav className="py-1 max-h-[72vh] overflow-y-auto">
+                      {parsedSections.map((section, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setSelectedSectionIdx(idx)}
+                          className={`w-full text-left px-4 py-2.5 text-sm transition-all border-l-2 ${
+                            selectedSectionIdx === idx
+                              ? "bg-blue-600/20 text-blue-400 font-semibold border-blue-500"
+                              : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/40 border-transparent"
+                          }`}
+                        >
+                          {section.title}
+                        </button>
+                      ))}
+                    </nav>
                   </div>
                 </div>
-              ) : (
-                /* Fallback: full content without sections */
-                <div className="max-w-4xl mx-auto">
-                  <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-12 py-10">
+
+                {/* Section content */}
+                <div className="flex-1 min-w-0 flex flex-col gap-4">
+                  <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-10 py-8">
+                    <h2 className="text-2xl font-extrabold text-blue-700 mb-6 pb-3 border-b-2 border-blue-100 tracking-tight">
+                      {parsedSections[selectedSectionIdx]?.title ?? ""}
+                    </h2>
                     <div className="space-y-0">
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                        {preprocessNoteContent(notes[selectedStudyTopic])}
+                        {preprocessNoteContent(parsedSections[selectedSectionIdx]?.content ?? "")}
                       </ReactMarkdown>
                     </div>
                   </div>
+                  {/* Prev / Next navigation */}
+                  <div className="flex justify-between">
+                    <button
+                      disabled={selectedSectionIdx === 0}
+                      onClick={() => setSelectedSectionIdx((i) => Math.max(0, i - 1))}
+                      className="px-4 py-2 rounded-full bg-gray-800/60 border border-gray-700/40 text-gray-300 text-sm font-medium disabled:opacity-30 hover:bg-gray-700/60 transition-all"
+                    >
+                      ← Previous
+                    </button>
+                    <span className="text-gray-500 text-sm self-center">
+                      {selectedSectionIdx + 1} / {parsedSections.length}
+                    </span>
+                    <button
+                      disabled={selectedSectionIdx === parsedSections.length - 1}
+                      onClick={() => setSelectedSectionIdx((i) => Math.min(parsedSections.length - 1, i + 1))}
+                      className="px-4 py-2 rounded-full bg-gray-800/60 border border-gray-700/40 text-gray-300 text-sm font-medium disabled:opacity-30 hover:bg-gray-700/60 transition-all"
+                    >
+                      Next →
+                    </button>
+                  </div>
                 </div>
-              )
-            ) : (
-              <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
-                {!selectedStudyTopic
-                  ? <p className="text-gray-400 text-lg">Select a topic from the bar above to start studying.</p>
-                  : <p className="text-gray-500">Notes not available for this topic.</p>}
               </div>
-            )}
-          </div>
+            ) : (
+              /* Fallback: full content without sections */
+              <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-12 py-10">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                  {preprocessNoteContent(notes[selectedStudyTopic])}
+                </ReactMarkdown>
+              </div>
+            )
+          ) : (
+            <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
+              {!selectedStudyTopic
+                ? <p className="text-gray-400 text-lg">Select a topic above to start studying.</p>
+                : <p className="text-gray-500">Notes not available for this topic.</p>}
+            </div>
+          )}
         </div>
       ) : null}
 
