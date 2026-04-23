@@ -6,18 +6,17 @@ import { GlassCard } from "@/components/ui";
 import { getSupabaseClient } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
-const CV_BUCKET = "cvs";
+const CV_BUCKET = "CV";
 const MAX_CV_MB = 5;
 
 function CvSection({ user }: { user: User | null }) {
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [existingCvUrl, setExistingCvUrl] = useState<string | null>(user?.user_metadata?.cv_url ?? null);
+  const [existingCvName, setExistingCvName] = useState<string>(user?.user_metadata?.cv_filename ?? "resume.pdf");
+  const [uploadedAt, setUploadedAt] = useState<string | null>(user?.user_metadata?.cv_uploaded_at ?? null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const existingCvUrl: string | null = user?.user_metadata?.cv_url ?? null;
-  const existingCvName: string = user?.user_metadata?.cv_filename ?? "resume.pdf";
-  const uploadedAt: string | null = user?.user_metadata?.cv_uploaded_at ?? null;
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -56,20 +55,24 @@ function CvSection({ user }: { user: User | null }) {
     }
 
     const { data: urlData } = client.storage.from(CV_BUCKET).getPublicUrl(cvPath);
-    await client.auth.updateUser({
-      data: {
-        cv_url: urlData.publicUrl,
-        cv_filename: cvFile.name,
-        cv_uploaded_at: new Date().toISOString(),
-      },
+    const now = new Date().toISOString();
+
+    // Update user_profiles table (source of truth)
+    await client.from("user_profiles").upsert({
+      id: user.id,
+      cv_path: cvPath,
+      cv_url: urlData.publicUrl,
+      cv_filename: cvFile.name,
+      cv_uploaded_at: now,
     });
 
     setUploading(false);
     setCvFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    setExistingCvUrl(urlData.publicUrl);
+    setExistingCvName(cvFile.name);
+    setUploadedAt(now);
     setStatus({ type: "success", msg: "CV updated successfully." });
-    // Refresh user metadata in Supabase session
-    await client.auth.refreshSession();
   }
 
   return (
