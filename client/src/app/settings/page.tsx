@@ -13,10 +13,31 @@ function CvSection({ user }: { user: User | null }) {
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
-  const [existingCvUrl, setExistingCvUrl] = useState<string | null>(user?.user_metadata?.cv_url ?? null);
-  const [existingCvName, setExistingCvName] = useState<string>(user?.user_metadata?.cv_filename ?? "resume.pdf");
-  const [uploadedAt, setUploadedAt] = useState<string | null>(user?.user_metadata?.cv_uploaded_at ?? null);
+  const [existingCvUrl, setExistingCvUrl] = useState<string | null>(null);
+  const [existingCvName, setExistingCvName] = useState<string>("resume.pdf");
+  const [uploadedAt, setUploadedAt] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load CV info from user_profiles table
+  useEffect(() => {
+    if (!user) { setProfileLoading(false); return; }
+    const client = getSupabaseClient();
+    if (!client) { setProfileLoading(false); return; }
+    void client
+      .from("user_profiles")
+      .select("cv_url, cv_filename, cv_uploaded_at")
+      .eq("id", user.id)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setExistingCvUrl(data.cv_url ?? null);
+          setExistingCvName(data.cv_filename ?? "resume.pdf");
+          setUploadedAt(data.cv_uploaded_at ?? null);
+        }
+        setProfileLoading(false);
+      });
+  }, [user]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -81,7 +102,9 @@ function CvSection({ user }: { user: User | null }) {
       <p className="mt-1 text-sm text-qace-muted">Your CV is used to personalise interview coaching and question selection.</p>
 
       {/* Current CV */}
-      {existingCvUrl ? (
+      {profileLoading ? (
+        <div className="mt-4 h-14 animate-pulse rounded-lg bg-white/5" />
+      ) : existingCvUrl ? (
         <div className="mt-4 flex items-center gap-3 rounded-lg border border-white/10 bg-black/20 px-4 py-3">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 flex-shrink-0 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
