@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import AuthSplitLayout from "@/components/AuthSplitLayout";
 import { getSupabaseClient, hasSupabaseEnv } from "@/lib/supabase";
 
-const CV_BUCKET = "cvs";
+const CV_BUCKET = "CV";
 const MAX_CV_MB = 5;
 
 export default function SignupPage() {
@@ -87,15 +87,24 @@ export default function SignupPage() {
       return;
     }
 
-    // 3. Get public URL and store in user metadata
+    // 3. Get public URL
     const { data: urlData } = client.storage.from(CV_BUCKET).getPublicUrl(cvPath);
-    await client.auth.updateUser({
-      data: {
-        cv_url: urlData.publicUrl,
-        cv_filename: cvFile.name,
-        cv_uploaded_at: new Date().toISOString(),
-      },
+
+    // 4. Insert user_profiles row (CV relation)
+    const { error: profileError } = await client.from("user_profiles").insert({
+      id: userId,
+      full_name: fullName,
+      cv_path: cvPath,
+      cv_url: urlData.publicUrl,
+      cv_filename: cvFile.name,
+      cv_uploaded_at: new Date().toISOString(),
     });
+
+    if (profileError) {
+      setLoading(false);
+      setError(`Profile creation failed: ${profileError.message}`);
+      return;
+    }
 
     setLoading(false);
     setMessage("Account created. If email confirmation is enabled, please verify your inbox.");
