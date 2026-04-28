@@ -485,13 +485,19 @@ def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str], 
             "The candidate's answer is surface-level but on the right track. "
             "Pick a specific claim or phrase from their answer and ask them to go deeper. "
             "For example, if they said they 'used caching', ask what caching strategy, what eviction policy, "
-            "and what the cache hit rate was. Be specific to THEIR answer, not generic."
+            "and what the cache hit rate was. Be specific to THEIR answer, not generic. "
+            "IMPORTANT: You are continuing the same question — do NOT introduce a new topic. "
+            "Reference something the candidate just said. Keep it to 1–2 sentences. "
+            "Do NOT start with 'Can you tell me about' or 'What is your experience with' — those are new-question openers."
         ),
         "PROBE_GAP": (
             "The candidate missed an important dimension of the question. "
             "Acknowledge what they covered, then ask about the specific missing part. "
             "Your follow-up should sound like a natural clarifying question from an experienced interviewer, "
-            "not a teacher correcting a student."
+            "not a teacher correcting a student. "
+            "IMPORTANT: You are continuing the same question — do NOT introduce a new topic. "
+            "Reference something the candidate just said. Keep it to 1–2 sentences. "
+            "Do NOT start with 'Can you tell me about' or 'What is your experience with' — those are new-question openers."
         ),
         "REDIRECT": (
             "The candidate's answer is off-topic or not addressing the question. "
@@ -501,12 +507,16 @@ def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str], 
         "CHALLENGE": (
             "The candidate made bold claims without specifics. "
             "Ask for one concrete example: a specific decision THEY made, a real number, or a measurable result. "
-            "Sound curious, not accusatory — like you genuinely want to understand their contribution."
+            "Sound curious, not accusatory — like you genuinely want to understand their contribution. "
+            "IMPORTANT: You are continuing the same question — do NOT introduce a new topic. "
+            "Keep it to 1–2 sentences max."
         ),
         "RESCUE": (
             "The candidate is clearly stuck or struggling. Be supportive without giving away the answer. "
             "Simplify the question or offer a starting angle: 'Let me put it this way...' or "
-            "'What if we narrow this down to just...'. Help them find solid ground."
+            "'What if we narrow this down to just...'. Help them find solid ground. "
+            "IMPORTANT: You are continuing the same question — do NOT introduce a new topic. "
+            "Keep it to 1–2 sentences."
         ),
         "INTERRUPT": (
             "The candidate has been talking too long. Politely interject: "
@@ -525,7 +535,9 @@ def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str], 
         ),
         "REFRAME": (
             "The candidate asked for clarification. Answer their question briefly and specifically, "
-            "then redirect them to answer. Do not repeat the entire question."
+            "then redirect them to answer. Do not repeat the entire question. "
+            "IMPORTANT: You are continuing the same question — do NOT introduce a new topic. "
+            "Keep your clarification to 1–2 sentences."
         ),
     }
 

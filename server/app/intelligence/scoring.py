@@ -41,19 +41,38 @@ def clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, value))
 
 
+def _wpm_score(wpm: float) -> float:
+    """
+    Research-aligned WPM score (0-100).
+    Sweet spot 140–160 WPM (professional interview standard, Huru research).
+    Slow and fast are penalised asymmetrically: slow risks disengagement,
+    fast (>190 WPM) degrades comprehension 17–25% (Tctecinnovation research).
+    """
+    if wpm == 0:
+        return 0.0
+    if 140 <= wpm <= 160:    # research-confirmed sweet spot
+        return 100.0
+    if 130 <= wpm < 140:     # slightly slow — still professional
+        return 85.0
+    if 160 < wpm <= 175:     # fast but energetic — acceptable
+        return 80.0
+    if 120 <= wpm < 130:     # noticeably slow — some disengagement risk
+        return 65.0
+    if 175 < wpm <= 195:     # fast, comprehension starts dropping
+        return 60.0
+    if 100 <= wpm < 120:     # too slow — audience tunes out
+        return 45.0
+    if 195 < wpm <= 220:     # comprehension significantly impacted
+        return 35.0
+    return 20.0              # extreme outliers
+
+
 def compute_fluency(wpm: float, filler_count: int, duration_s: float = 60.0) -> float:
     """
     Fluency score (0-100).
-    Sweet spot: 130-160 WPM. Penalty for fillers.
+    Sweet spot: 140-160 WPM. Filler penalty is rate-based (per minute).
     """
-    if 130 <= wpm <= 160:
-        wpm_score = 100.0
-    elif 120 <= wpm < 130 or 160 < wpm <= 180:
-        wpm_score = 80.0
-    elif 100 <= wpm < 120 or 180 < wpm <= 200:
-        wpm_score = 60.0
-    else:
-        wpm_score = 40.0
+    wpm_score = _wpm_score(wpm)
 
     fillers_per_min = filler_count / max(duration_s / 60.0, 1.0)
     filler_penalty = min(fillers_per_min * 5.0, 40.0)
@@ -66,12 +85,20 @@ def compute_composure(
     blinks_per_min: float,
     emotion_positivity: float,
 ) -> float:
-    """Composure score (0-100)."""
+    """Composure score (0-100).
+
+    Weights (research-backed):
+      0.40 eye contact      — reduced from 0.60; single MediaPipe ratio is fragile
+                              (camera angle, lighting, glasses all affect it)
+      0.25 blink norm       — unchanged
+      0.35 emotion          — raised from 0.15; multimodal engagement signals
+                              correlate r=0.73+ with hiring ratings (U. Rochester)
+    """
     blink_deviation = abs(blinks_per_min - 17.5) / 17.5
     composure = (
-        0.60 * eye_contact_ratio * 100
+        0.40 * eye_contact_ratio * 100
         + 0.25 * max(0, 1.0 - blink_deviation) * 100
-        + 0.15 * emotion_positivity * 100
+        + 0.35 * emotion_positivity * 100
     )
     return clamp(composure)
 
@@ -104,9 +131,9 @@ def compute_utterance_scores(
     # Content (70%)
     content = clamp(text_quality_score + llm_modifier)
 
-    # Delivery (20%)
+    # Delivery (20%) — fluency weighted higher; acoustic confidence is a narrower signal
     fluency = compute_fluency(wpm, filler_count, duration_s)
-    delivery = clamp(0.50 * fluency + 0.50 * vocal_confidence * 100)
+    delivery = clamp(0.65 * fluency + 0.35 * vocal_confidence * 100)
 
     # Composure (10%)
     composure = compute_composure(eye_contact_ratio, blinks_per_min, emotion_positivity)
@@ -208,7 +235,16 @@ class InterviewScoringEngine:
                 emotion_positivity = max(0.0, min(1.0, float(maybe)))
 
         llm_star = telemetry.get("llm_star_evaluation", text_quality_score)
-        llm_modifier = max(-10.0, min(10.0, float(llm_star) - text_quality_score))
+        raw_modifier = float(llm_star) - text_quality_score
+        # Fix 4: Variable cap by question type — LLM is most reliable for STAR
+        # behavioral answers; BERT + RAG are more reliable for technical ones.
+        q_subtype = telemetry.get("question_subtype", "unknown")
+        if q_subtype == "behavioral":
+            llm_modifier = max(-20.0, min(15.0, raw_modifier))
+        elif q_subtype == "technical":
+            llm_modifier = max(-10.0, min(10.0, raw_modifier))
+        else:
+            llm_modifier = max(-12.0, min(12.0, raw_modifier))
 
         scores = compute_utterance_scores(
             text_quality_score=text_quality_score,
@@ -223,7 +259,7 @@ class InterviewScoringEngine:
         )
 
         deduction_flags: list[str] = []
-        if filler_count >= 6:
+        if (filler_count / max(duration_s / 60.0, 0.5)) >= 4.0:  # rate-based: ≥4 fillers/min
             deduction_flags.append("high_fillers")
         if wpm > 190:
             deduction_flags.append("too_fast")

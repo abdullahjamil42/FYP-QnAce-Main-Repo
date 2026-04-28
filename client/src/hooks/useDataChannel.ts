@@ -102,6 +102,7 @@ export type ChannelEvent =
   | ({ type: "phase" } & PhaseEvent)
   | ({ type: "question" } & QuestionEvent)
   | ({ type: "interviewer_feedback" } & InterviewerFeedbackEvent)
+  | ({ type: "interviewer_prompt" } & { subtype: "nonverbal" })
   | ({ type: "interview_end" } & InterviewEndEvent);
 
 export function useDataChannel(
@@ -118,6 +119,7 @@ export function useDataChannel(
   const [currentQuestion, setCurrentQuestion] = useState<QuestionEvent | null>(null);
   const [questionHistory, setQuestionHistory] = useState<QuestionEvent[]>([]);
   const [interviewEnd, setInterviewEnd] = useState<InterviewEndEvent | null>(null);
+  const [nonverbalPromptCount, setNonverbalPromptCount] = useState(0);
 
   useEffect(() => {
     if (!dataChannel) return;
@@ -201,6 +203,12 @@ export function useDataChannel(
             }));
             break;
           }
+          case "interviewer_prompt":
+            // Gap 5: nonverbal soft-prompt from interviewer at ~5s silence
+            if ((parsed as any).subtype === "nonverbal") {
+              setNonverbalPromptCount((n) => n + 1);
+            }
+            break;
           case "interview_end":
             setInterviewEnd({
               total_questions: parsed.total_questions,
@@ -279,6 +287,7 @@ export function useDataChannel(
     currentQuestion,
     questionHistory,
     interviewEnd,
+    nonverbalPromptCount,
     sendCommand,
     sendCodingDebrief,
     clearTranscripts,
