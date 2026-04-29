@@ -7,7 +7,7 @@ import AppShell from "@/components/AppShell";
 import { Badge, GlassCard, ProgressRow } from "@/components/ui";
 import { getQuestionsForTopic } from "@/lib/mcq-bank";
 import { getSupabaseClient } from "@/lib/supabase";
-import { fetchQuizQuestions, type QuizQuestion } from "@/lib/mcq-question-store";
+import { fetchQuizQuestions, fetchMcqCatalog, type QuizQuestion } from "@/lib/mcq-question-store";
 import {
   listMcqTopicProgress,
   listRecentMcqAttempts,
@@ -16,7 +16,8 @@ import {
   type MCQAttemptRecord,
   type MCQTopicProgress,
 } from "@/lib/mcq-progress-store";
-import { listNoteFolders, listFolderFiles, getNoteByFile, preprocessNoteContent, type NoteSection } from "@/lib/notes";
+import { listNoteFolders, listFolderFiles, getNoteByFile, preprocessNoteContent, parseNoteSections, type NoteSection } from "@/lib/notes";
+import NotesChatWidget from "@/components/NotesChatWidget";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -132,12 +133,6 @@ type Note = {
   updated_at: string;
 };
 
-type CatalogTopic = {
-  id: string;
-  title: string;
-  default_questions: number;
-};
-
 type CatalogSubtopic = {
   topic_id: string;
   title: string;
@@ -217,47 +212,20 @@ export default function PracticePage() {
   useEffect(() => {
     let cancelled = false;
     async function loadData() {
-      if (!supabase) return;
-      const [progress, attempts, { data: authData }] = await Promise.all([
+      const [progress, attempts, catalogData, authData] = await Promise.all([
         listMcqTopicProgress(),
         listRecentMcqAttempts(5),
-        supabase.auth.getUser(),
+        fetchMcqCatalog(),
+        supabase ? supabase.auth.getUser() : Promise.resolve({ data: { user: null } }),
       ]);
 
       if (cancelled) return;
 
-      setUser(authData.user);
-
-      let catalog: Array<{ id: string; title: string; subtopicCount: number; defaultQuestions: number }> = [];
-      let loadedSubtopics: CatalogSubtopic[] = [];
-      const topicsTable = supabase.from("mcq_topics" as any) as any;
-      const subtopicsTable = supabase.from("mcq_subtopics" as any) as any;
-      const [{ data: topics }, { data: subtopics }] = await Promise.all([
-        topicsTable.select("id,title,default_questions").eq("is_active", true).order("title", { ascending: true }),
-        subtopicsTable.select("topic_id,title").eq("is_active", true),
-      ]);
-
-      const topicRows = (topics ?? []) as CatalogTopic[];
-      const subtopicRows = (subtopics ?? []) as CatalogSubtopic[];
-      loadedSubtopics = subtopicRows;
-      const counts = new Map<string, number>();
-      for (const row of subtopicRows) {
-        counts.set(row.topic_id, (counts.get(row.topic_id) ?? 0) + 1);
-      }
-
-      catalog = topicRows.map((topic) => ({
-        id: topic.id,
-        title: topic.title,
-        subtopicCount: counts.get(topic.id) ?? 0,
-        defaultQuestions: topic.default_questions ?? 1000,
-      }));
-
-      if (!cancelled) {
-        setTopicProgress(progress);
-        setRecentAttempts(attempts);
-        setCatalogTopics(catalog);
-        setCatalogSubtopics(loadedSubtopics);
-      }
+      setUser(authData.data.user);
+      setTopicProgress(progress);
+      setRecentAttempts(attempts);
+      setCatalogTopics(catalogData.topics);
+      setCatalogSubtopics(catalogData.subtopics);
     }
     void loadData();
     return () => {
@@ -289,6 +257,32 @@ export default function PracticePage() {
     if (note) setNotes((prev) => ({ ...prev, [path]: note }));
     setLoadingNotes((prev) => ({ ...prev, [path]: false }));
   };
+
+  // Re-parse sections whenever the visible note's content changes
+  useEffect(() => {
+    if (!selectedStudyTopic) {
+      setParsedSections([]);
+      return;
+    }
+    const content = notes[selectedStudyTopic];
+    if (!content) {
+      setParsedSections([]);
+      return;
+    }
+    setParsedSections(parseNoteSections(content));
+  }, [selectedStudyTopic, notes]);
+
+  // Derive Notes Chat widget context from current section / file
+  const currentNoteSection = parsedSections[selectedSectionIdx];
+  const currentFileLabel = selectedStudyTopic
+    ? folderFiles.find((f) => f.path === selectedStudyTopic)?.label ?? null
+    : null;
+  const chatSectionLabel = currentNoteSection?.label ?? currentFileLabel;
+  const chatSectionContent =
+    currentNoteSection?.content ??
+    (selectedStudyTopic ? notes[selectedStudyTopic] ?? "" : "");
+  const chatNoteContext = chatSectionContent.slice(0, 800);
+  const chatResetKey = `${selectedFolder ?? ""}::${chatSectionLabel ?? ""}`;
 
   // Load bucket folders when entering study mode
   useEffect(() => {
@@ -685,7 +679,7 @@ export default function PracticePage() {
                     if (dbQuestions.length === 0) {
                       const localCount = isMixed ? 0 : getQuestionsForTopic(selectedCatalogTopic.id).length;
                       if (localCount === 0) {
-                        setQuizConfigNotice("No questions found for this selection. Import mcq_questions into Supabase and try again.");
+                        setQuizConfigNotice("No questions match this selection. Try a different subtopic or difficulty.");
                         return;
                       }
                       setActiveTopicId(selectedCatalogTopic.id);
@@ -1002,6 +996,12 @@ export default function PracticePage() {
           </GlassCard>
         </section>
       ) : null}
+      <NotesChatWidget
+        topic={selectedFolder}
+        section={chatSectionLabel}
+        noteContext={chatNoteContext}
+        resetKey={chatResetKey}
+      />
     </AppShell>
   );
 }

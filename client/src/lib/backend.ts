@@ -65,6 +65,55 @@ export async function* streamCoaching(request: CoachingRequest): AsyncGenerator<
   }
 }
 
+export type NotesChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type NotesChatRequest = {
+  topic: string;
+  section: string;
+  note_context: string;
+  history: NotesChatMessage[];
+  message: string;
+};
+
+/**
+ * Stream a topic-scoped tutor reply for the Study Notes page.
+ * Yields text chunks as they arrive from the SSE endpoint.
+ */
+export async function* streamNotesChat(req: NotesChatRequest): AsyncGenerator<string> {
+  const response = await fetch(`${getApiUrl()}/notes/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Notes chat request failed: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6);
+      if (data === "[DONE]") return;
+      yield data.replace(/\\n/g, "\n");
+    }
+  }
+}
+
 export async function fetchBackendHealth(): Promise<HealthResponse | null> {
   try {
     const response = await fetch(`${getApiUrl()}/health`, {

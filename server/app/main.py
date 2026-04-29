@@ -20,6 +20,7 @@ from .config import get_settings
 from .intelligence.llm import check_local_llm_endpoint
 from .intelligence.rag import init_rag
 from .models.registry import prewarm_all
+from .notes_chat import router as notes_chat_router
 from .preparation import router as preparation_router
 
 logger = logging.getLogger("qace")
@@ -101,6 +102,9 @@ app.include_router(coding_router, prefix="/coding", tags=["Coding"])
 
 # ── Preparation route ──
 app.include_router(preparation_router, prefix="/preparation", tags=["Preparation"])
+
+# ── Notes chat (topic-scoped study assistant) ──
+app.include_router(notes_chat_router, prefix="/notes", tags=["Notes"])
 
 # ── WebRTC signaling route (lazy import to avoid hard dep on aiortc) ──
 try:
