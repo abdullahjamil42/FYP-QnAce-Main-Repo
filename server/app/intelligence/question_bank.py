@@ -296,4 +296,10 @@ def generate_question_set(
     rng.shuffle(closing_pool)
     selected_closing = [_format_closing_question(q) for q in closing_pool[:closing_count]]
 
+    # Fix 3: question_bank[0] must be a technical question so that the first
+    # bank question delivered by _start_question_flow(0) is never a behavioral
+    # repeat of the intro.  Pull the first technical question to the front,
+    # then append behavioral, remaining technical, then closing.
+    if technical:
+        return [technical[0]] + selected_behavioral + technical[1:] + selected_closing
     return selected_behavioral + technical + selected_closing

@@ -31,6 +31,7 @@ import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NEENZA_URL = "https://raw.githubusercontent.com/neenza/leetcode-problems/master/merged_problems.json"
+NEENZA_LOCAL = REPO_ROOT / "data" / "merged_problems.json"
 DEFAULT_OUTPUT = REPO_ROOT / "dsa_final_a_plus.json"
 
 # Load .env from repo root so GROQ_API_KEY etc. are available without pre-exporting
@@ -45,9 +46,12 @@ if _env_file.is_file():
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
+# Global Groq cooldown — if time.monotonic() < this, skip Groq and go straight to Airforce
+_groq_available_at: float = 0.0
+
 # Airforce free fallback — base URL only (path appended in call_airforce)
 AIRFORCE_BASE_URL = "https://api.airforce"
-AIRFORCE_MODEL = "llama-3.3-70b"
+AIRFORCE_MODEL = "llama-4-scout"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("dsa_bank_gen")
@@ -75,7 +79,8 @@ async def call_groq(client: httpx.AsyncClient, messages: list[dict], max_tokens:
             timeout=60.0,
         )
         if r.status_code == 429:
-            raise RateLimitError("429")
+            retry_after = float(r.headers.get("retry-after", 0))
+            raise RateLimitError("429", retry_after=retry_after)
         if r.status_code == 400:
             logger.warning("Groq 400 error: %s", r.text[:300])
             return None
@@ -93,43 +98,64 @@ async def call_airforce(client: httpx.AsyncClient, messages: list[dict], max_tok
     base = os.environ.get("AIRFORCE_API_URL", AIRFORCE_BASE_URL).rstrip("/")
     for path in ("/v1/chat/completions", "/chat/completions"):
         url = base + path
-        try:
-            r = await client.post(
-                url,
-                json={"model": AIRFORCE_MODEL, "messages": messages, "max_tokens": max_tokens},
-                timeout=90.0,
-            )
-            if r.status_code in (404, 405):
-                continue
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
-        except Exception as exc:
-            logger.warning("Airforce call failed (%s): %s", url, exc)
+        for attempt in range(3):
+            try:
+                r = await client.post(
+                    url,
+                    json={"model": AIRFORCE_MODEL, "messages": messages, "max_tokens": max_tokens},
+                    timeout=90.0,
+                )
+                if r.status_code in (404, 405):
+                    break  # this path doesn't work, try next
+                if r.status_code == 429:
+                    wait = float(r.headers.get("retry-after", 5 * (attempt + 1)))
+                    wait = min(wait, 30.0)
+                    logger.info("Airforce 429 (attempt %d) — waiting %.0fs", attempt + 1, wait)
+                    await asyncio.sleep(wait)
+                    continue
+                r.raise_for_status()
+                content = r.json()["choices"][0]["message"]["content"]
+                # Airforce returns 200 with an error message when model is unsupported
+                if "does not exist" in content or "discord.gg" in content:
+                    logger.warning("Airforce model error: %s", content[:120])
+                    return None
+                # Strip proxy advertisement footer injected by some Airforce nodes
+                if "\n\nNeed proxies" in content:
+                    content = content[:content.index("\n\nNeed proxies")]
+                return content
+            except Exception as exc:
+                logger.warning("Airforce call failed (%s): %s", url, exc)
+                break  # non-429 exception — try next path
     return None
 
 
 class RateLimitError(Exception):
-    pass
+    def __init__(self, msg: str, retry_after: float = 0.0):
+        super().__init__(msg)
+        self.retry_after = retry_after
 
 
 async def call_llm(client: httpx.AsyncClient, messages: list[dict], max_tokens: int = 4096) -> str | None:
-    """Try Groq with exponential backoff, fall back to Airforce."""
-    backoff = 15
-    for attempt in range(6):
+    """Try Groq once (if not in cooldown), fall back to Airforce immediately."""
+    global _groq_available_at
+    now = time.monotonic()
+    if now >= _groq_available_at:
         try:
             result = await call_groq(client, messages, max_tokens, json_mode=True)
             if result:
                 return result
-            # Groq returned None (400 or other non-429) — try without JSON mode once
             result = await call_groq(client, messages, max_tokens, json_mode=False)
             if result:
                 return result
-            break  # non-rate-limit failure — skip Groq
-        except RateLimitError:
-            logger.info("Rate limited (attempt %d) — waiting %ds", attempt + 1, backoff)
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 120)
-            continue
+        except RateLimitError as e:
+            # On 429, put Groq in cooldown for the indicated duration (min 60s, max 3600s)
+            cooldown = e.retry_after if e.retry_after > 0 else 60.0
+            cooldown = max(60.0, min(cooldown, 3600.0))
+            _groq_available_at = time.monotonic() + cooldown
+            logger.info("Groq rate-limited — cooling down for %.0fs (Airforce will handle in meantime)", cooldown)
+    else:
+        remaining = _groq_available_at - now
+        logger.debug("Groq in cooldown for %.0fs more — going straight to Airforce", remaining)
     return await call_airforce(client, messages, max_tokens)
 
 
@@ -213,6 +239,7 @@ async def enrich_problem(
         if not raw:
             logger.warning("LLM returned nothing for problem %d (%s)", idx, prob.get("title"))
             return None
+        logger.debug("LLM raw for %d (%s): %s", idx, prob.get("title"), raw[:200])
         data: dict | None = None
         try:
             data = json.loads(strip_fences(raw))
@@ -261,10 +288,10 @@ async def enrich_problem(
             "examples": examples,
             "constraints": constraints,
             "hints": hints,
-            "optimal_approach": (data.get("optimal_approach") or "")[:2000],
-            "python_code": (data.get("python_code") or "")[:8000],
-            "time_complexity": (data.get("time_complexity") or "Unknown")[:50],
-            "space_complexity": (data.get("space_complexity") or "Unknown")[:50],
+            "optimal_approach": str(data.get("optimal_approach") or "")[:2000],
+            "python_code": str(data.get("python_code") or "")[:8000],
+            "time_complexity": str(data.get("time_complexity") or "Unknown")[:50],
+            "space_complexity": str(data.get("space_complexity") or "Unknown")[:50],
             "leetcode_url": prob.get("leetcode_url") or prob.get("url") or (
                 f"https://leetcode.com/problems/{prob['problem_slug']}/"
                 if prob.get("problem_slug") else ""
@@ -313,8 +340,14 @@ async def main() -> None:
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output JSON file path")
     parser.add_argument("--count", type=int, default=0, help="Max problems to process (0 = all)")
     parser.add_argument("--resume", action="store_true", help="Skip IDs already in output file")
-    parser.add_argument("--concurrency", type=int, default=2, help="Max parallel LLM calls")
+    parser.add_argument("--concurrency", type=int, default=1, help="Max parallel LLM calls")
     args = parser.parse_args()
+
+    # Auto-use local cache if source is the default URL and cache exists
+    source = args.source
+    if source == NEENZA_URL and NEENZA_LOCAL.is_file():
+        logger.info("Using local cache: %s", NEENZA_LOCAL)
+        source = str(NEENZA_LOCAL)
 
     output_path = Path(args.output)
 
@@ -330,7 +363,7 @@ async def main() -> None:
             logger.warning("Could not load existing output: %s", exc)
 
     async with httpx.AsyncClient() as client:
-        raw_problems = await load_source(args.source, client)
+        raw_problems = await load_source(source, client)
         logger.info("Loaded %d problems from source", len(raw_problems))
 
         # Apply --count limit
@@ -364,7 +397,7 @@ async def main() -> None:
                 if enriched is not None:
                     results.append(enriched)
                 completed += 1
-                if completed % 25 == 0:
+                if completed % 5 == 0:
                     logger.info("Progress: %d / %d", completed, len(running_tasks))
                     save(output_path, sorted(results, key=lambda x: x.get("id", 0)))
         except (KeyboardInterrupt, asyncio.CancelledError):

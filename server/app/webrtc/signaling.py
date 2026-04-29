@@ -545,6 +545,18 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
         """
         dc = session.get("data_channel")
 
+        # Fix 4: _start_question_flow must never be entered while the intro is
+        # still in progress — the intro is handled by _begin_interview and
+        # _answer_fallback_timer(-1).  If this fires during intro it means a
+        # regression introduced a second delivery path for question_bank[0].
+        if session.get("interview_stage") == "intro":
+            logger.error(
+                "_start_question_flow(%d) called while interview_stage='intro' — "
+                "aborting to prevent duplicate question delivery",
+                q_index,
+            )
+            return
+
         # Ensure local LLM is in neutral 'none' mode (clear evaluator bias)
         # Only do this at the very beginning of the interview
         if q_index == 0:
@@ -1135,9 +1147,15 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
                 word_count >= max(10, int(getattr(settings, "interview_interrupt_word_limit", 250)))
             )
             next_q_idx = int(session.get("interview_question_idx", 0))
-            next_prompt_text = ""
-            if next_q_idx < len(questions):
-                next_prompt_text = questions[next_q_idx].get("text", "")
+            # Fix 1: during intro the first bank question must not be leaked to
+            # the LLM or fallback — _start_question_flow is the sole delivery
+            # point for that question.
+            if session.get("interview_stage") == "intro":
+                next_prompt_text = None
+            else:
+                next_prompt_text = ""
+                if next_q_idx < len(questions):
+                    next_prompt_text = questions[next_q_idx].get("text", "")
 
             # Pass the full accumulated answer so the LLM sees everything the
             # user has said for this question, not just the latest segment.
@@ -1155,7 +1173,7 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
                 previous_mode=previous_mode,
                 session_state=interviewer_state,
                 monologue_flag=monologue_flag,
-                next_question=next_prompt_text or "Thank you for your answer.",
+                next_question=next_prompt_text if next_prompt_text is not None else "Thank you for your introduction.",
                 settings=settings,
                 cv_summary=session.get("cv_summary", ""),
             )

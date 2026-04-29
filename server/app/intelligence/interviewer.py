@@ -478,8 +478,9 @@ def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str], 
 
     mode_directives = {
         "ADVANCE": (
-            "Briefly acknowledge one specific thing the candidate said well, then naturally transition "
-            "to the next question. Do not over-praise."
+            "Briefly acknowledge one specific thing the candidate said well. "
+            "Do NOT say or repeat the next question — it will be asked separately after you finish. "
+            "Keep to 1–2 short sentences only. Do not over-praise."
         ),
         "PROBE_DEPTH": (
             "The candidate's answer is surface-level but on the right track. "
@@ -639,15 +640,15 @@ def _fallback_spoken(
     anchor = follow_up_anchor or "that point"
 
     if mode == "ADVANCE":
-        return f"Okay, good. Let us move forward. {next_question}"
+        return "Okay, good. Let us move forward."
     if mode == "PROBE_DEPTH":
         return f"You mentioned {anchor}. Can you walk me through the specific steps you took and what the outcome was?"
     if mode == "PROBE_GAP":
         return f"That is a good start. I noticed you did not touch on {anchor} though. How would you approach that part specifically?"
     if mode == "REDIRECT":
         if redirect_count <= 1:
-            return f"I appreciate the context. Let us bring it back to the original question though. {next_question}"
-        return next_question
+            return "I appreciate the context. Let us bring it back to the original question though."
+        return "Let us refocus on the original question."
     if mode == "CHALLENGE":
         if "overclaim" in active_flags:
             return "I would like to understand your personal contribution. What specific decision did you make, and what measurable result did it produce?"
@@ -659,10 +660,10 @@ def _fallback_spoken(
     if mode == "CONFRONT":
         return f"Before we move on, I want to clarify something. {contradiction_evidence} Which one is accurate?"
     if mode == "ACKNOWLEDGE_IDK":
-        return f"That is completely fine. Let us move on. {next_question}"
+        return "That is completely fine. Let us move on."
     if mode == "REFRAME":
         return "Let me rephrase that. Think about a specific situation you have been in. What decisions did you make and what trade-offs were involved?"
-    return next_question
+    return "Let us continue."
 
 
 async def generate_interviewer_turn(
