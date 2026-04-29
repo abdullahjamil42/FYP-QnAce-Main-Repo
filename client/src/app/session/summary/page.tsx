@@ -57,6 +57,7 @@ export default function SessionSummaryPage() {
           transcript_texts: texts,
           vocal_emotion: session!.latest_perception?.vocal_emotion ?? "neutral",
           face_emotion: session!.latest_perception?.face_emotion ?? "neutral",
+          session_id: session!.id,
         });
 
         setCoachingStatus("streaming");

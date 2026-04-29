@@ -1,8 +1,22 @@
+import { getSupabaseClient } from "@/lib/supabase";
+
 type HealthResponse = {
   status: string;
   env: string;
   models: Record<string, string | null>;
 };
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return {};
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
 
 export type CoachingRequest = {
   mode: string;
@@ -15,6 +29,7 @@ export type CoachingRequest = {
   transcript_texts: string[];
   vocal_emotion?: string;
   face_emotion?: string;
+  session_id?: string;
 };
 
 export function getApiUrl(): string {
@@ -35,7 +50,7 @@ export function getApiUrl(): string {
 export async function* streamCoaching(request: CoachingRequest): AsyncGenerator<string> {
   const response = await fetch(`${getApiUrl()}/coaching/generate`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(request),
   });
 
@@ -85,7 +100,7 @@ export type NotesChatRequest = {
 export async function* streamNotesChat(req: NotesChatRequest): AsyncGenerator<string> {
   const response = await fetch(`${getApiUrl()}/notes/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(req),
   });
 
@@ -111,6 +126,21 @@ export async function* streamNotesChat(req: NotesChatRequest): AsyncGenerator<st
       if (data === "[DONE]") return;
       yield data.replace(/\\n/g, "\n");
     }
+  }
+}
+
+export async function fetchNotesChatHistory(topic: string): Promise<NotesChatMessage[]> {
+  if (!topic) return [];
+  try {
+    const response = await fetch(
+      `${getApiUrl()}/notes/chat/history?topic=${encodeURIComponent(topic)}`,
+      { headers: { ...(await authHeaders()) }, cache: "no-store" },
+    );
+    if (!response.ok) return [];
+    const data = (await response.json()) as { messages?: NotesChatMessage[] };
+    return data.messages ?? [];
+  } catch {
+    return [];
   }
 }
 

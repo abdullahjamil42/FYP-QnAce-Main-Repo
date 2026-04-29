@@ -14,23 +14,35 @@ POST /notes/chat
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from .auth import require_user
 from .config import get_settings
 from .intelligence.llm import resolve_provider_config, stream_llm
+from .personalization import (
+    build_student_context,
+    fetch_history_for_user,
+    fetch_recent_messages,
+    get_or_create_conversation,
+    insert_message,
+    maybe_refresh_summary,
+)
 
 logger = logging.getLogger("qace.notes_chat")
 
 router = APIRouter()
 
 NOTES_CHAT_SYSTEM_PROMPT = """\
-You are Q&Ace's Study Notes tutor — a friendly, conversational AI study \
-buddy. The student is reading a specific section of their notes (shown \
-below) and chatting with you about it.
+You are Q&Ace's Study Notes tutor — the student's personal mentor. \
+Warm, encouraging, honest. You greet the student by their first name on \
+the very first turn of a conversation (and only then), and you weave in \
+what you know about their progress when it's genuinely relevant — not as \
+a recital. The student is reading a specific section of their notes \
+(shown below) and chatting with you about it.
 
 Your job is to TEACH, not to recite the notes. The student already has the \
 notes in front of them. They're talking to you because they want a thinking \
@@ -154,7 +166,10 @@ def _build_transcript(
     return "\n".join(parts)
 
 
-async def _stream_notes_chat(request: NotesChatRequest) -> AsyncIterator[str]:
+async def _stream_notes_chat(
+    request: NotesChatRequest,
+    user_id: Optional[str],
+) -> AsyncIterator[str]:
     settings = get_settings()
     provider = resolve_provider_config(settings)
 
@@ -162,9 +177,24 @@ async def _stream_notes_chat(request: NotesChatRequest) -> AsyncIterator[str]:
         yield "data: [LLM not configured — set GROQ_API_KEY or start the local LLM server]\n\n"
         return
 
-    history = request.history[-6:]
     note_context = request.note_context[:800]
     message = request.message[:1500]
+
+    conversation_id: str | None = None
+    if user_id and request.topic:
+        conversation_id = await get_or_create_conversation(
+            user_id, "notes_chat", topic_id=request.topic
+        )
+
+    if conversation_id:
+        db_messages = await fetch_recent_messages(conversation_id, limit=12)
+        history: list[ChatMessage] = [ChatMessage(**m) for m in db_messages]
+        await insert_message(conversation_id, "user", message)
+    else:
+        history = list(request.history[-6:])
+
+    student_context = await build_student_context(user_id)
+    system_prompt = NOTES_CHAT_SYSTEM_PROMPT + student_context
 
     transcript = _build_transcript(
         topic=request.topic,
@@ -174,21 +204,50 @@ async def _stream_notes_chat(request: NotesChatRequest) -> AsyncIterator[str]:
         message=message,
     )
 
+    assistant_chunks: list[str] = []
     async for token in stream_llm(
         transcript=transcript,
-        system_prompt=NOTES_CHAT_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         provider_config=provider,
         temperature=0.4,
         max_tokens=400,
     ):
+        assistant_chunks.append(token)
         safe = token.replace("\n", "\\n")
         yield f"data: {safe}\n\n"
+
+    if conversation_id:
+        full = "".join(assistant_chunks).strip()
+        if full:
+            await insert_message(conversation_id, "assistant", full)
+        if user_id:
+            import asyncio
+            asyncio.create_task(
+                maybe_refresh_summary(user_id, conversation_id=conversation_id)
+            )
 
     yield "data: [DONE]\n\n"
 
 
+@router.get("/chat/history")
+async def notes_chat_history(
+    topic: str,
+    user_id: Optional[str] = Depends(require_user),
+) -> dict:
+    """Return persisted chat history for the current user + topic."""
+    if not user_id or not topic:
+        return {"messages": []}
+    messages = await fetch_history_for_user(
+        user_id, "notes_chat", topic_id=topic, limit=50
+    )
+    return {"messages": messages}
+
+
 @router.post("/chat")
-async def notes_chat(request: NotesChatRequest) -> StreamingResponse:
+async def notes_chat(
+    request: NotesChatRequest,
+    user_id: Optional[str] = Depends(require_user),
+) -> StreamingResponse:
     """
     Stream a topic-scoped tutor reply for the Study Notes page.
 
@@ -196,7 +255,7 @@ async def notes_chat(request: NotesChatRequest) -> StreamingResponse:
     chunk. The final event is `data: [DONE]`.
     """
     return StreamingResponse(
-        _stream_notes_chat(request),
+        _stream_notes_chat(request, user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

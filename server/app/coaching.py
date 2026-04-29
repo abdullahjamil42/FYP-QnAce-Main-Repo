@@ -13,28 +13,39 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from .auth import require_user
 from .config import get_settings
 from .intelligence.llm import resolve_provider_config, stream_llm, swap_adapter
+from .personalization import (
+    build_student_context,
+    get_or_create_conversation,
+    insert_message,
+    maybe_refresh_summary,
+)
 
 logger = logging.getLogger("qace.coaching")
 
 router = APIRouter()
 
 COACHING_SYSTEM_PROMPT = """\
-You are Q&Ace's post-interview study coach. After a mock interview session, \
-you help candidates strengthen their weak areas through targeted study material.
+You are Q&Ace's post-interview personal coach. After a mock interview session, \
+you help the candidate strengthen their weak areas through targeted feedback. \
+You're a warm mentor: direct about gaps, generous about wins, and you address \
+the candidate by their first name when you know it.
 
 Your coaching style:
 - Clear and structured — use short sections with bold headers
 - Encouraging but honest — address gaps directly without being harsh
 - Practical — every piece of content should help the candidate perform better next time
+- Personal — when you know the candidate's name and history, weave it in naturally \
+  ("Aziq, your delivery is up from last time — the gap now is structure")
 
 You will receive session data including scores, interview mode, difficulty, \
 and a transcript of what the candidate said. Generate a personalized coaching \
@@ -60,9 +71,13 @@ class CoachingRequest(BaseModel):
     transcript_texts: list[str] = []
     vocal_emotion: str = "neutral"
     face_emotion: str = "neutral"
+    session_id: Optional[str] = None
 
 
-async def _stream_coaching(request: CoachingRequest) -> AsyncIterator[str]:
+async def _stream_coaching(
+    request: CoachingRequest,
+    user_id: Optional[str],
+) -> AsyncIterator[str]:
     settings = get_settings()
     provider = resolve_provider_config(settings)
 
@@ -71,6 +86,15 @@ async def _stream_coaching(request: CoachingRequest) -> AsyncIterator[str]:
         return
 
     is_local = provider.provider == "local"
+
+    student_context = await build_student_context(user_id)
+    system_prompt = COACHING_SYSTEM_PROMPT + student_context
+
+    conversation_id: str | None = None
+    if user_id and request.session_id:
+        conversation_id = await get_or_create_conversation(
+            user_id, "coaching", session_id=request.session_id
+        )
 
     # Build the user message from session data
     transcript_summary = "\n".join(
@@ -95,14 +119,16 @@ async def _stream_coaching(request: CoachingRequest) -> AsyncIterator[str]:
     if is_local:
         await swap_adapter("coach")
 
+    assistant_chunks: list[str] = []
     try:
         async for token in stream_llm(
             transcript=user_message,
-            system_prompt=COACHING_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             provider_config=provider,
             temperature=0.6,
             max_tokens=350,
         ):
+            assistant_chunks.append(token)
             # SSE format
             safe = token.replace("\n", "\\n")
             yield f"data: {safe}\n\n"
@@ -111,11 +137,25 @@ async def _stream_coaching(request: CoachingRequest) -> AsyncIterator[str]:
         if is_local:
             await swap_adapter("evaluator")
 
+    if conversation_id:
+        full = "".join(assistant_chunks).strip()
+        if full:
+            await insert_message(conversation_id, "user", user_message)
+            await insert_message(conversation_id, "assistant", full)
+        if user_id:
+            import asyncio
+            asyncio.create_task(
+                maybe_refresh_summary(user_id, conversation_id=conversation_id, force=True)
+            )
+
     yield "data: [DONE]\n\n"
 
 
 @router.post("/generate")
-async def generate_coaching(request: CoachingRequest) -> StreamingResponse:
+async def generate_coaching(
+    request: CoachingRequest,
+    user_id: Optional[str] = Depends(require_user),
+) -> StreamingResponse:
     """
     Stream AI coaching feedback for a completed interview session.
 
@@ -123,7 +163,7 @@ async def generate_coaching(request: CoachingRequest) -> StreamingResponse:
     chunk. The final event is `data: [DONE]`.
     """
     return StreamingResponse(
-        _stream_coaching(request),
+        _stream_coaching(request, user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

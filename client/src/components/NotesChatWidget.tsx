@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { streamNotesChat, type NotesChatMessage } from "@/lib/backend";
+import { fetchNotesChatHistory, streamNotesChat, type NotesChatMessage } from "@/lib/backend";
 
 type Props = {
   topic: string | null;
@@ -42,9 +42,20 @@ export default function NotesChatWidget({ topic, section, noteContext, resetKey 
   const disabled = !topic || !noteContext.trim();
 
   useEffect(() => {
-    setMessages([]);
     setInput("");
-  }, [resetKey]);
+    if (!topic) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const history = await fetchNotesChatHistory(topic);
+      if (!cancelled) setMessages(history);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [topic, resetKey]);
 
   useEffect(() => {
     const el = scrollRef.current;
