@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { GlassCard } from "@/components/ui";
 import { listSessions, type SessionRecord } from "@/lib/interview-session-store";
 
 export default function ReportsPage() {
@@ -28,25 +27,26 @@ export default function ReportsPage() {
       title="Feedback Reports"
       subtitle="Open detailed report views to inspect scoring rationale, delivery metrics, and concrete improvement suggestions."
     >
-      <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {sessions.map((session, index) => (
-          <GlassCard key={session.id} className={index % 3 === 0 ? "animate-fade-up" : index % 3 === 1 ? "animate-fade-up-delayed" : "animate-fade-up-delayed-2"}>
-            <p className="text-xs uppercase tracking-wide text-qace-muted">Report</p>
-            <h2 className="mt-1 text-lg font-semibold">{session.id.slice(0, 8)}</h2>
-            <p className="mt-2 text-sm text-qace-muted">
-              {session.mode} · {session.difficulty} · Final score {session.final_score.toFixed(0)}
-            </p>
-            <Link href={`/reports/${session.id}`} className="mt-4 inline-flex rounded-lg bg-white/10 px-3 py-2 text-sm font-medium transition hover:bg-white/15">
-              View Details
-            </Link>
-          </GlassCard>
-        ))}
+      <div className="card-glow animate-fade-up overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
         {sessions.length === 0 ? (
-          <GlassCard className="animate-fade-up md:col-span-2 lg:col-span-3">
+          <div className="px-5 py-5">
             <p className="text-sm text-qace-muted">No reports yet. Complete a live interview session to generate your first report.</p>
-          </GlassCard>
-        ) : null}
-      </section>
+          </div>
+        ) : (
+          sessions.map((session, index) => (
+            <div key={session.id} className={index < sessions.length - 1 ? "border-b border-white/10 px-5 py-5" : "px-5 py-5"}>
+              <p className="text-xs uppercase tracking-wide text-qace-muted">Report</p>
+              <h2 className="mt-1 text-lg font-semibold">{session.id.slice(0, 8)}</h2>
+              <p className="mt-2 text-sm text-qace-muted">
+                {session.mode} · {session.difficulty} · Final score {session.final_score.toFixed(0)}
+              </p>
+              <Link href={`/reports/${session.id}`} className="mt-4 inline-flex rounded-lg bg-white/10 px-3 py-2 text-sm font-medium transition hover:bg-white/15">
+                View Details
+              </Link>
+            </div>
+          ))
+        )}
+      </div>
     </AppShell>
   );
 }

@@ -2,7 +2,6 @@
 
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { GlassCard } from "@/components/ui";
 import { getSupabaseClient } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
@@ -97,7 +96,7 @@ function CvSection({ user }: { user: User | null }) {
   }
 
   return (
-    <GlassCard className="animate-fade-up col-span-full">
+    <div className="px-5 py-5">
       <h2 className="text-lg font-semibold">CV / Resume</h2>
       <p className="mt-1 text-sm text-qace-muted">Your CV is used to personalise interview coaching and question selection.</p>
 
@@ -182,7 +181,7 @@ function CvSection({ user }: { user: User | null }) {
           </p>
         ) : null}
       </div>
-    </GlassCard>
+    </div>
   );
 }
 
@@ -204,46 +203,52 @@ export default function SettingsPage() {
       title="Profile & Preferences"
       subtitle="Personalize your interview prep defaults, feedback behavior, and privacy controls."
     >
-      <section className="grid gap-4 md:grid-cols-2">
-        {/* CV Section — spans full width */}
-        <CvSection user={user} />
+      <div className="card-glow animate-fade-up overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
 
-        <GlassCard className="animate-fade-up">
-          <h2 className="text-lg font-semibold">Interview Defaults</h2>
-          <div className="mt-4 space-y-3 text-sm text-qace-muted">
-            <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-              <span>Default mode</span>
-              <span className="text-white">Technical</span>
-            </label>
-            <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-              <span>Session length</span>
-              <span className="text-white">20 minutes</span>
-            </label>
-            <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-              <span>Difficulty</span>
-              <span className="text-white">Standard</span>
-            </label>
-          </div>
-        </GlassCard>
+        {/* CV Section */}
+        <div className="border-b border-white/10">
+          <CvSection user={user} />
+        </div>
 
-        <GlassCard className="animate-fade-up-delayed">
-          <h2 className="text-lg font-semibold">Device & Privacy</h2>
-          <div className="mt-4 space-y-3 text-sm text-qace-muted">
-            <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-              <span>Camera preview in lobby</span>
-              <input type="checkbox" defaultChecked className="h-4 w-4 accent-qace-primary" />
-            </label>
-            <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-              <span>Store session transcripts</span>
-              <input type="checkbox" defaultChecked className="h-4 w-4 accent-qace-primary" />
-            </label>
-            <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-              <span>Email performance digest</span>
-              <input type="checkbox" className="h-4 w-4 accent-qace-primary" />
-            </label>
+        {/* Interview Defaults + Device & Privacy side by side */}
+        <div className="grid grid-cols-1 divide-y divide-white/10 md:grid-cols-2 md:divide-x md:divide-y-0">
+          <div className="px-5 py-5">
+            <h2 className="text-lg font-semibold">Interview Defaults</h2>
+            <div className="mt-4 space-y-3 text-sm text-qace-muted">
+              <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
+                <span>Default mode</span>
+                <span className="text-white">Technical</span>
+              </label>
+              <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
+                <span>Session length</span>
+                <span className="text-white">20 minutes</span>
+              </label>
+              <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
+                <span>Difficulty</span>
+                <span className="text-white">Standard</span>
+              </label>
+            </div>
           </div>
-        </GlassCard>
-      </section>
+          <div className="px-5 py-5">
+            <h2 className="text-lg font-semibold">Device & Privacy</h2>
+            <div className="mt-4 space-y-3 text-sm text-qace-muted">
+              <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
+                <span>Camera preview in lobby</span>
+                <input type="checkbox" defaultChecked className="h-4 w-4 accent-qace-primary" />
+              </label>
+              <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
+                <span>Store session transcripts</span>
+                <input type="checkbox" defaultChecked className="h-4 w-4 accent-qace-primary" />
+              </label>
+              <label className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
+                <span>Email performance digest</span>
+                <input type="checkbox" className="h-4 w-4 accent-qace-primary" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+      </div>
     </AppShell>
   );
 }

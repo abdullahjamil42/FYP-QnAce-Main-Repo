@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { Badge, GlassCard } from "@/components/ui";
+import { Badge } from "@/components/ui";
 import { jobRoles, interviewTypes, roundTypes } from "@/lib/mock-data";
 import { loadSetupConfig, saveSetupConfig } from "@/lib/interview-session-store";
 import { apiGet } from "@/lib/coding-api";
@@ -86,140 +86,129 @@ export default function SetupPage() {
         )
       }
     >
-      {/* Job Role */}
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">Select Job Role</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {jobRoles.map((role, index) => (
-            <GlassCard
-              key={role.id}
-              className={
-                index < 2
-                  ? "animate-fade-up"
-                  : index < 4
-                    ? "animate-fade-up-delayed"
-                    : "animate-fade-up-delayed-2"
-              }
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-2xl">{role.icon}</span>
-                {jobRole === role.id && <Badge tone="success">Selected</Badge>}
-              </div>
-              <h3 className="mt-2 text-base font-semibold">{role.title}</h3>
-              <p className="mt-1 text-xs text-qace-muted">{role.description}</p>
+      {/* Single unified glass container — same design as NotesChatWidget */}
+      <div className="card-glow animate-fade-up overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
+
+        {/* Job Role */}
+        <div className="border-b border-white/10 px-5 py-5">
+          <h2 className="mb-3 text-lg font-semibold">Select Job Role</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {jobRoles.map((role) => (
               <button
+                key={role.id}
+                type="button"
                 onClick={() => setJobRole(role.id)}
-                className={`mt-3 w-full rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                className={`rounded-xl border p-4 text-left transition ${
                   jobRole === role.id
-                    ? "border-qace-accent bg-qace-accent/20 text-white"
-                    : "border-white/20 bg-white/5 hover:bg-white/10"
+                    ? "border-qace-accent bg-qace-accent/10"
+                    : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10"
                 }`}
               >
-                {jobRole === role.id ? "Selected" : "Select"}
-              </button>
-            </GlassCard>
-          ))}
-        </div>
-      </section>
-
-      {/* Interview Round */}
-      <section className="mt-6">
-        <h2 className="mb-3 text-lg font-semibold">Interview Round</h2>
-        <div className="grid gap-4 md:grid-cols-2">
-          {roundTypes.map((rt) => (
-            <GlassCard key={rt.id} className="animate-fade-up-delayed">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">{rt.icon}</span>
-                  <h3 className="text-lg font-semibold">{rt.title}</h3>
-                </div>
-                {roundType === rt.id && <Badge tone="success">Selected</Badge>}
-              </div>
-              <p className="mt-2 text-sm text-qace-muted">{rt.description}</p>
-              <button
-                onClick={() => setRoundType(rt.id as "verbal" | "coding")}
-                className={`mt-4 w-full rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                  roundType === rt.id
-                    ? "border-qace-accent bg-qace-accent/20 text-white"
-                    : "border-white/20 bg-white/5 hover:bg-white/10"
-                }`}
-              >
-                {roundType === rt.id ? "Selected" : "Select"}
-              </button>
-            </GlassCard>
-          ))}
-        </div>
-      </section>
-
-      {/* Verbal → Interview Format */}
-      {roundType === "verbal" && (
-        <section className="mt-6">
-          <h2 className="mb-3 text-lg font-semibold">Interview Format</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            {interviewTypes.map((type) => (
-              <GlassCard key={type.id} className="animate-fade-up-delayed">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold">{type.title}</h3>
-                  {interviewType === type.id && <Badge tone="success">Selected</Badge>}
+                  <span className="text-2xl">{role.icon}</span>
+                  {jobRole === role.id && <Badge tone="success">Selected</Badge>}
                 </div>
-                <p className="mt-2 text-sm text-qace-muted">{type.description}</p>
-                <div className="mt-3 flex items-center gap-3 text-xs text-qace-muted">
-                  <span>{type.durationMinutes > 0 ? `${type.durationMinutes} min` : "No limit"}</span>
-                  <span>~{type.questionCount} questions</span>
-                  {type.id === "extensive" && <Badge tone="warning">Emotion Analysis</Badge>}
-                </div>
-                <button
-                  onClick={() => setInterviewType(type.id as "quick" | "extensive")}
-                  className={`mt-4 w-full rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                    interviewType === type.id
-                      ? "border-qace-accent bg-qace-accent/20 text-white"
-                      : "border-white/20 bg-white/5 hover:bg-white/10"
-                  }`}
-                >
-                  {interviewType === type.id ? "Selected" : "Select"}
-                </button>
-              </GlassCard>
+                <h3 className="mt-2 text-sm font-semibold">{role.title}</h3>
+                <p className="mt-1 text-xs text-qace-muted">{role.description}</p>
+              </button>
             ))}
           </div>
-        </section>
-      )}
+        </div>
 
-      {/* Coding → Difficulty Selection */}
-      {roundType === "coding" && (
-        <section className="mt-6">
-          <h2 className="mb-3 text-lg font-semibold">Problem Difficulty</h2>
-          <div className="grid gap-4 md:grid-cols-3">
-            {difficulties.map((d) => (
-              <GlassCard key={d.id} className="animate-fade-up-delayed">
+        {/* Interview Round */}
+        <div className="border-b border-white/10 px-5 py-5">
+          <h2 className="mb-3 text-lg font-semibold">Interview Round</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            {roundTypes.map((rt) => (
+              <button
+                key={rt.id}
+                type="button"
+                onClick={() => setRoundType(rt.id as "verbal" | "coding")}
+                className={`rounded-xl border p-4 text-left transition ${
+                  roundType === rt.id
+                    ? "border-qace-accent bg-qace-accent/10"
+                    : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10"
+                }`}
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-2xl">{d.icon}</span>
-                    <h3 className="text-lg font-semibold">{d.title}</h3>
+                    <span className="text-2xl">{rt.icon}</span>
+                    <h3 className="text-lg font-semibold">{rt.title}</h3>
                   </div>
-                  {codingDifficulty === d.id && <Badge tone="success">Selected</Badge>}
+                  {roundType === rt.id && <Badge tone="success">Selected</Badge>}
                 </div>
-                <p className="mt-2 text-sm text-qace-muted">{d.description}</p>
-                <button
-                  onClick={() => setCodingDifficulty(d.id)}
-                  className={`mt-4 w-full rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                    codingDifficulty === d.id
-                      ? "border-qace-accent bg-qace-accent/20 text-white"
-                      : "border-white/20 bg-white/5 hover:bg-white/10"
-                  }`}
-                >
-                  {codingDifficulty === d.id ? "Selected" : "Select"}
-                </button>
-              </GlassCard>
+                <p className="mt-2 text-sm text-qace-muted">{rt.description}</p>
+              </button>
             ))}
           </div>
-        </section>
-      )}
+        </div>
 
-      {/* Session Preview */}
-      <section className="mt-6">
-        <GlassCard className="animate-fade-up-delayed-2">
-          <h3 className="text-base font-semibold">Session Preview</h3>
-          <div className="mt-3 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+        {/* Verbal → Interview Format */}
+        {roundType === "verbal" && (
+          <div className="border-b border-white/10 px-5 py-5">
+            <h2 className="mb-3 text-lg font-semibold">Interview Format</h2>
+            <div className="grid gap-4 md:grid-cols-2">
+              {interviewTypes.map((type) => (
+                <button
+                  key={type.id}
+                  type="button"
+                  onClick={() => setInterviewType(type.id as "quick" | "extensive")}
+                  className={`rounded-xl border p-4 text-left transition ${
+                    interviewType === type.id
+                      ? "border-qace-accent bg-qace-accent/10"
+                      : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold">{type.title}</h3>
+                    {interviewType === type.id && <Badge tone="success">Selected</Badge>}
+                  </div>
+                  <p className="mt-2 text-sm text-qace-muted">{type.description}</p>
+                  <div className="mt-3 flex items-center gap-3 text-xs text-qace-muted">
+                    <span>{type.durationMinutes > 0 ? `${type.durationMinutes} min` : "No limit"}</span>
+                    <span>~{type.questionCount} questions</span>
+                    {type.id === "extensive" && <Badge tone="warning">Emotion Analysis</Badge>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Coding → Difficulty Selection */}
+        {roundType === "coding" && (
+          <div className="border-b border-white/10 px-5 py-5">
+            <h2 className="mb-3 text-lg font-semibold">Problem Difficulty</h2>
+            <div className="grid gap-4 md:grid-cols-3">
+              {difficulties.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setCodingDifficulty(d.id)}
+                  className={`rounded-xl border p-4 text-left transition ${
+                    codingDifficulty === d.id
+                      ? "border-qace-accent bg-qace-accent/10"
+                      : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">{d.icon}</span>
+                      <h3 className="text-lg font-semibold">{d.title}</h3>
+                    </div>
+                    {codingDifficulty === d.id && <Badge tone="success">Selected</Badge>}
+                  </div>
+                  <p className="mt-2 text-sm text-qace-muted">{d.description}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Session Preview */}
+        <div className="px-5 py-5">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-qace-muted">Session Preview</p>
+          <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
             <div>
               <p className="text-xs text-qace-muted">Role</p>
               <p className="mt-0.5 font-medium capitalize">{jobRoles.find((r) => r.id === jobRole)?.title}</p>
@@ -252,8 +241,9 @@ export default function SetupPage() {
               </>
             )}
           </div>
-        </GlassCard>
-      </section>
+        </div>
+
+      </div>
     </AppShell>
   );
 }

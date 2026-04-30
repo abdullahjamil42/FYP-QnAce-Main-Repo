@@ -1,5 +1,4 @@
 import AppShell from "@/components/AppShell";
-import { GlassCard } from "@/components/ui";
 
 const faqs = [
   {
@@ -22,19 +21,18 @@ export default function HelpPage() {
       title="Help & FAQ"
       subtitle="Troubleshoot common issues and understand how Q&Ace evaluates your interview performance."
     >
-      <section className="grid gap-4 md:grid-cols-2">
-        {faqs.map((faq, index) => (
-          <GlassCard key={faq.question} className={index === 0 ? "animate-fade-up" : index === 1 ? "animate-fade-up-delayed" : "animate-fade-up-delayed-2"}>
+      <div className="card-glow animate-fade-up overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
+        {faqs.map((faq) => (
+          <div key={faq.question} className="border-b border-white/10 px-5 py-5">
             <h2 className="text-lg font-semibold">{faq.question}</h2>
             <p className="mt-2 text-sm text-qace-muted">{faq.answer}</p>
-          </GlassCard>
+          </div>
         ))}
-      </section>
-
-      <GlassCard className="mt-4 animate-fade-up-delayed-2">
-        <h3 className="text-lg font-semibold">Need support?</h3>
-        <p className="mt-2 text-sm text-qace-muted">For setup issues, check camera permissions, microphone input source, and backend service availability on port 8000.</p>
-      </GlassCard>
+        <div className="px-5 py-5">
+          <h3 className="text-lg font-semibold">Need support?</h3>
+          <p className="mt-2 text-sm text-qace-muted">For setup issues, check camera permissions, microphone input source, and backend service availability on port 8000.</p>
+        </div>
+      </div>
     </AppShell>
   );
 }

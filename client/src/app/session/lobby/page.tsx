@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { Badge, GlassCard } from "@/components/ui";
+import { Badge } from "@/components/ui";
 import { fetchBackendHealth } from "@/lib/backend";
 import { loadSetupConfig } from "@/lib/interview-session-store";
 import { jobRoles, interviewTypes } from "@/lib/mock-data";
@@ -117,8 +117,10 @@ export default function SessionLobbyPage() {
         </Link>
       }
     >
-      <section className="grid gap-4 md:grid-cols-2">
-        <GlassCard className="animate-fade-up">
+      <div className="card-glow animate-fade-up overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
+
+        {/* Device Readiness */}
+        <div className="border-b border-white/10 px-5 py-5">
           <h2 className="text-lg font-semibold">Device Readiness</h2>
           <p className="mt-1 text-sm text-qace-muted">Validate your setup before starting to avoid interruptions.</p>
           <div className="mt-4 space-y-2">
@@ -151,9 +153,10 @@ export default function SessionLobbyPage() {
               </span>
             </p>
           </div>
-        </GlassCard>
+        </div>
 
-        <GlassCard className="animate-fade-up-delayed">
+        {/* Session Notes */}
+        <div className="px-5 py-5">
           <h2 className="text-lg font-semibold">Session Notes</h2>
           <ul className="mt-3 space-y-2 text-sm text-qace-muted">
             <li>Keep your camera at eye level and maintain natural eye contact.</li>
@@ -186,8 +189,9 @@ export default function SessionLobbyPage() {
               </div>
             )}
           </div>
-        </GlassCard>
-      </section>
+        </div>
+
+      </div>
     </AppShell>
   );
 }

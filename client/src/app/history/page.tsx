@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { Badge, GlassCard } from "@/components/ui";
+import { Badge } from "@/components/ui";
 import { listSessions, type SessionRecord } from "@/lib/interview-session-store";
 
 export default function HistoryPage() {
@@ -33,7 +33,7 @@ export default function HistoryPage() {
         </Link>
       }
     >
-      <GlassCard className="animate-fade-up overflow-hidden p-0">
+      <div className="card-glow animate-fade-up overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
         <table className="w-full text-left text-sm">
           <thead className="bg-white/5 text-qace-muted">
             <tr>
@@ -71,7 +71,7 @@ export default function HistoryPage() {
             ) : null}
           </tbody>
         </table>
-      </GlassCard>
+      </div>
     </AppShell>
   );
 }

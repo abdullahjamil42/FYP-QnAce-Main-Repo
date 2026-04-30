@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { GlassCard, ProgressRow } from "@/components/ui";
+import { ProgressRow } from "@/components/ui";
 import { listSessions, type SessionRecord } from "@/lib/interview-session-store";
 
 export default function DashboardPage() {
@@ -62,50 +62,55 @@ export default function DashboardPage() {
         </Link>
       }
     >
-      <section className="grid gap-4 md:grid-cols-3">
-        <GlassCard className="animate-fade-up">
-          <p className="text-sm text-qace-muted">Current Score</p>
-          <p className="mt-2 text-4xl font-semibold text-qace-accent">{currentScore.toFixed(0)}</p>
-          <p className="mt-1 text-xs text-emerald-300">{delta >= 0 ? "+" : ""}{delta.toFixed(0)} vs previous session</p>
-        </GlassCard>
-        <GlassCard className="animate-fade-up-delayed">
-          <p className="text-sm text-qace-muted">Sessions Completed</p>
-          <p className="mt-2 text-4xl font-semibold">{sessions.length}</p>
-          <p className="mt-1 text-xs text-qace-muted">Latest session tracked in reports and history.</p>
-        </GlassCard>
-        <GlassCard className="animate-fade-up-delayed-2">
-          <p className="text-sm text-qace-muted">Best Category</p>
-          <p className="mt-2 text-2xl font-semibold">
-            {avgContent >= avgDelivery && avgContent >= avgComposure
-              ? "Content Quality"
-              : avgDelivery >= avgComposure
-                ? "Delivery"
-                : "Composure"}
-          </p>
-          <p className="mt-1 text-xs text-qace-muted">Computed from your saved interview sessions.</p>
-        </GlassCard>
-      </section>
+      <div className="card-glow animate-fade-up overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
 
-      <section className="mt-4 grid gap-4 lg:grid-cols-2">
-        <GlassCard className="animate-fade-up-delayed">
-          <h2 className="text-lg font-semibold">7-Session Trend</h2>
-          <div className="mt-4 flex h-40 items-end gap-2">
-            {weekTrend.map((point, idx) => (
-              <div key={`${point}-${idx}`} className="flex-1 rounded-t-lg bg-gradient-to-t from-qace-primary to-qace-accent/90" style={{ height: `${point}%` }} />
-            ))}
+        {/* Stats row */}
+        <div className="grid grid-cols-1 divide-y divide-white/10 border-b border-white/10 md:grid-cols-3 md:divide-x md:divide-y-0">
+          <div className="px-5 py-5">
+            <p className="text-sm text-qace-muted">Current Score</p>
+            <p className="mt-2 text-4xl font-semibold text-qace-accent">{currentScore.toFixed(0)}</p>
+            <p className="mt-1 text-xs text-emerald-300">{delta >= 0 ? "+" : ""}{delta.toFixed(0)} vs previous session</p>
           </div>
-          <p className="mt-2 text-xs text-qace-muted">Latest trajectory indicates steady upward momentum.</p>
-        </GlassCard>
+          <div className="px-5 py-5">
+            <p className="text-sm text-qace-muted">Sessions Completed</p>
+            <p className="mt-2 text-4xl font-semibold">{sessions.length}</p>
+            <p className="mt-1 text-xs text-qace-muted">Latest session tracked in reports and history.</p>
+          </div>
+          <div className="px-5 py-5">
+            <p className="text-sm text-qace-muted">Best Category</p>
+            <p className="mt-2 text-2xl font-semibold">
+              {avgContent >= avgDelivery && avgContent >= avgComposure
+                ? "Content Quality"
+                : avgDelivery >= avgComposure
+                  ? "Delivery"
+                  : "Composure"}
+            </p>
+            <p className="mt-1 text-xs text-qace-muted">Computed from your saved interview sessions.</p>
+          </div>
+        </div>
 
-        <GlassCard className="animate-fade-up-delayed-2">
-          <h2 className="mb-3 text-lg font-semibold">Focus Areas</h2>
-          <div className="space-y-3">
-            <ProgressRow label="Content Quality" value={avgContent} hint="Increase concrete impact metrics and sharper examples." />
-            <ProgressRow label="Delivery" value={avgDelivery} hint="Use short pause control to reduce filler words." />
-            <ProgressRow label="Composure" value={avgComposure} hint="Maintain eye-line and confidence in follow-up probes." />
+        {/* Charts row */}
+        <div className="grid grid-cols-1 divide-y divide-white/10 md:grid-cols-2 md:divide-x md:divide-y-0">
+          <div className="px-5 py-5">
+            <h2 className="text-lg font-semibold">7-Session Trend</h2>
+            <div className="mt-4 flex h-40 items-end gap-2">
+              {weekTrend.map((point, idx) => (
+                <div key={`${point}-${idx}`} className="flex-1 rounded-t-lg bg-gradient-to-t from-qace-primary to-qace-accent/90" style={{ height: `${point}%` }} />
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-qace-muted">Latest trajectory indicates steady upward momentum.</p>
           </div>
-        </GlassCard>
-      </section>
+          <div className="px-5 py-5">
+            <h2 className="mb-3 text-lg font-semibold">Focus Areas</h2>
+            <div className="space-y-3">
+              <ProgressRow label="Content Quality" value={avgContent} hint="Increase concrete impact metrics and sharper examples." />
+              <ProgressRow label="Delivery" value={avgDelivery} hint="Use short pause control to reduce filler words." />
+              <ProgressRow label="Composure" value={avgComposure} hint="Maintain eye-line and confidence in follow-up probes." />
+            </div>
+          </div>
+        </div>
+
+      </div>
     </AppShell>
   );
 }
