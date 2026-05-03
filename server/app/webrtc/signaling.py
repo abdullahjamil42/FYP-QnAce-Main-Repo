@@ -726,6 +726,10 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
         while session.get("current_phase") == "answering":
             await asyncio.sleep(0.5)
 
+            # A1: bind dc at loop top so all branches can use it safely,
+            # regardless of whether the user has spoken yet.
+            dc = session.get("data_channel")
+
             # Epoch guard: if a newer timer has been created (e.g. after a
             # follow-up reset), this stale instance must exit immediately.
             if session.get("fallback_timer_epoch", 0) != my_epoch:
@@ -746,12 +750,15 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             if session.get("transcribe_running"):
                 continue
 
-            # If VAD is currently detecting speech, skip checks.
-            # Safety: if EOS detector says no speech but vad_speaking is stuck,
-            # reset it (happens with short noise bursts from TTS echo).
+            # If VAD / EOS detector indicates active speech, skip checks.
+            # Use the EOS detector as ground truth; vad_speaking is a secondary
+            # flag that can be briefly cleared by the safety reset below.
+            eos_ref = session.get("eos_detector")
+            if eos_ref and eos_ref.is_speaking:
+                continue
+            # Secondary flag — clear if detector disagrees (stuck-flag guard).
             if session.get("vad_speaking"):
-                eos = session.get("eos_detector")
-                if eos and not eos.is_speaking:
+                if eos_ref and not eos_ref.is_speaking:
                     session["vad_speaking"] = False
                 else:
                     continue
@@ -768,7 +775,6 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             #    the fallback task (us!), which raises CancelledError and kills
             #    the transition. Instead, transition directly.
             if has_spoken and post_speech_silence >= 6.0:
-                dc = session.get("data_channel")
                 score = session.get("last_completeness_score", 0.0)
                 signals = session.get("last_completeness_signals", {})
                 from .data_channel import send_answer_complete
@@ -789,7 +795,6 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             if not has_spoken and total_silence >= 12.0 and not encouraged:
                 encouraged = True
                 session["answer_prompted_spoken"] = True
-                dc = session.get("data_channel")
                 phrase = random.choice(_ENCOURAGEMENT_PHRASES)
                 voice_name = _get_voice_name(session, settings)
                 send_status(dc, f"encouragement: {phrase}")
@@ -797,7 +802,6 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
 
             # 3. Never spoke at all for 20s -> Skip
             if not has_spoken and total_silence >= 20.0:
-                dc = session.get("data_channel")
                 send_status(dc, "silence-timeout: 20s, skipping question")
                 if q_index >= 0:
                     session["skipped_count"] = session.get("skipped_count", 0) + 1
@@ -871,6 +875,11 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
             next_idx = int(session.get("interview_question_idx", 0))
             questions = session.get("question_bank", [])
             if next_idx < len(questions):
+                # Clear intro stage so the Fix-4 guard does not block the first
+                # legitimate bank question (interview_question_idx stays 0 during
+                # intro because _begin_interview never calls _start_question_flow).
+                if session.get("interview_stage") == "intro":
+                    session["interview_stage"] = "questions"
                 await _start_question_flow(next_idx)
             else:
                 await _end_interview()
@@ -1427,6 +1436,11 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
         if session.get("current_phase") == "answering":
             logger.info("on_speech_start fired")
             session["vad_speaking"] = True
+            # Refresh the silence clock so a long continuous utterance does not
+            # look like 12+ seconds of silence to the fallback timer.
+            # (last_speech_time is only updated by on_speech_end, leaving it
+            # stale for the full duration of a multi-second speech.)
+            session["last_speech_time"] = time.perf_counter()
 
     def on_speech_end(audio_chunk):
         # Don't process audio captured while TTS is playing (echo rejection).

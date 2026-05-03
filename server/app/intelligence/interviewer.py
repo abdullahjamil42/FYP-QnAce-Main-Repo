@@ -53,6 +53,19 @@ IDK_PATTERNS = [
     re.compile(r"\bno\s+idea\b", re.IGNORECASE),
 ]
 
+# C1: Varied IDK acknowledgment pool (anti-repeat rotation)
+_IDK_ACK_POOL = [
+    "Totally fine — let us try a different angle.",
+    "No worries at all — this one trips a lot of people up.",
+    "That is okay, it is a tricky area.",
+    "Fair enough — let us move on.",
+    "Not a problem at all.",
+    "Completely fine — let us shift gears.",
+    "That is okay, not everyone has covered this.",
+    "No problem — let me ask you something else.",
+]
+_last_idk_ack_idx: int = -1
+
 CLARIFICATION_PATTERNS = [
     re.compile(r"\bcan\s+you\s+clarify\b", re.IGNORECASE),
     re.compile(r"\bwhat\s+do\s+you\s+mean\b", re.IGNORECASE),
@@ -261,6 +274,17 @@ def _detect_idk(answer: str) -> bool:
     return any(p.search(answer or "") for p in IDK_PATTERNS)
 
 
+def _detect_frustrated_idk(transcript: str) -> bool:
+    """True when candidate expresses IDK with visible frustration."""
+    t = (transcript or "").lower().strip()
+    return _detect_idk(transcript) and (
+        " please" in t or t.endswith("please")
+        or " man " in t or t.endswith(" man")
+        or "come on" in t
+        or "seriously" in t
+    )
+
+
 def _detect_reframe(answer: str) -> bool:
     return any(p.search(answer or "") for p in CLARIFICATION_PATTERNS)
 
@@ -396,9 +420,26 @@ def _classifier_system_prompt() -> str:
         "INTERRUPT, CONFRONT, ACKNOWLEDGE_IDK, REFRAME. "
         "Output schema: {\"mode\": string, \"evidence\": string, \"follow_up_anchor\": string, "
         "\"active_flags\": [string]}. "
-        "Use only active_flags from: contradiction, overclaim, bluff, hint-seeking, hostile. "
+        "Use only active_flags from: contradiction, overclaim, bluff, hint-seeking, hostile, low_confidence. "
         "Evidence must be one sentence. Follow_up_anchor must be a concrete phrase from candidate text. "
-        "Never output markdown. Never output anything other than a single valid JSON object."
+        "Never output markdown. "
+        "STAGE RULES — the payload includes interview_stage (intro, technical, or closing): "
+        "During intro stage you may only use PROBE_DEPTH, PROBE_GAP, REDIRECT, RESCUE, ACKNOWLEDGE_IDK, or ADVANCE. "
+        "CHALLENGE, CONFRONT, INTERRUPT, and REFRAME are all forbidden during intro. "
+        "During technical stage all modes are available but CHALLENGE and CONFRONT must follow frequency rules. "
+        "During technical stage, never insert behavioral questions even if RAG retrieves behavioral passages — "
+        "behavioral questions only come from the planned question sequence, never from classifier-driven generation. "
+        "During closing stage only use ADVANCE or ACKNOWLEDGE_IDK. "
+        ""
+        "CHALLENGE and CONFRONT frequency rules: "
+        "If the previous mode was CHALLENGE or CONFRONT, you must not select either again this turn. "
+        "If CHALLENGE or CONFRONT appears in any of the last 3 turns in recent_turns, prefer PROBE_DEPTH, PROBE_GAP, or ADVANCE instead. "
+        "These two modes together should make up no more than 25 percent of all turns in a session. "
+        ""
+        "ACKNOWLEDGE_IDK rule: if you select ACKNOWLEDGE_IDK, you must not select CHALLENGE or CONFRONT on the immediately following turn. "
+        ""
+        "ADVANCE rule: use ADVANCE when the answer was strong, or probe_count is 2 or higher, or the topic has been covered from multiple angles. "
+        "Never output anything other than a single valid JSON object."
     )
 
 
@@ -489,6 +530,10 @@ def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str], 
             "and what the cache hit rate was. Be specific to THEIR answer, not generic. "
             "IMPORTANT: You are continuing the same question — do NOT introduce a new topic. "
             "Reference something the candidate just said. Keep it to 1–2 sentences. "
+            "VARY YOUR OPENING — do not start every probe with 'You mentioned'. "
+            "Rotate through: 'Walk me through...', 'Can you expand on...', "
+            "'How would that work in practice when...', 'What would happen if...', "
+            "'Let us dig into...' — so consecutive probes never open the same way. "
             "Do NOT start with 'Can you tell me about' or 'What is your experience with' — those are new-question openers."
         ),
         "PROBE_GAP": (
@@ -525,14 +570,22 @@ def _build_mode_prompt(mode: str, redirect_count: int, active_flags: list[str], 
             "of their answer and ask a focused question about just that."
         ),
         "CONFRONT": (
-            "The candidate contradicted something they said earlier. "
-            "Bring it up non-accusatorily: 'Earlier you mentioned X, but just now you said Y. "
-            "Can you help me understand which is accurate?'"
+            "The candidate made a specific technical claim that contradicts something they said "
+            "earlier, or is factually unsupported. Challenge through curiosity, not accusation. "
+            "Use framing like: 'You touched on X — I am curious how that holds up when Y happens.' "
+            "or 'Building on what you said about X — what happens when Y?' "
+            "NEVER use CONFRONT if the transcript contains no substantive technical content. "
+            "NEVER reference the candidate's desire to skip, move on, or end the interview. "
+            "Sound genuinely curious, not confrontational. Keep to 1–2 sentences."
         ),
         "ACKNOWLEDGE_IDK": (
-            "The candidate admitted they do not know. Respond supportively: "
-            "'That is okay, not everyone has experience with that.' "
-            "Then move to the next question naturally."
+            "The candidate admitted they do not know. "
+            "Your response MUST have exactly two parts: "
+            "Part 1: A warm brief acknowledgment (e.g. 'Totally fine.', 'No worries.', 'Fair enough.', 'That is okay.'). "
+            "Part 2: A single bridge sentence (e.g. 'Let me ask you about something different.', 'Let us shift to a new area.', 'Moving on —'). "
+            "Do NOT cite anything from the current answer — the candidate said they do not know, so there is nothing to anchor on. "
+            "NEVER start with 'You mentioned'. "
+            "Keep total response under 2 sentences. Do NOT include the next question — it will be asked separately."
         ),
         "REFRAME": (
             "The candidate asked for clarification. Answer their question briefly and specifically, "
@@ -648,7 +701,7 @@ def _fallback_spoken(
     if mode == "REDIRECT":
         if redirect_count <= 1:
             return "I appreciate the context. Let us bring it back to the original question though."
-        return "Let us refocus on the original question."
+        return next_question or "Let us refocus on the original question."
     if mode == "CHALLENGE":
         if "overclaim" in active_flags:
             return "I would like to understand your personal contribution. What specific decision did you make, and what measurable result did it produce?"
@@ -660,7 +713,12 @@ def _fallback_spoken(
     if mode == "CONFRONT":
         return f"Before we move on, I want to clarify something. {contradiction_evidence} Which one is accurate?"
     if mode == "ACKNOWLEDGE_IDK":
-        return "That is completely fine. Let us move on."
+        global _last_idk_ack_idx
+        _idx = random.randint(0, len(_IDK_ACK_POOL) - 1)
+        while _idx == _last_idk_ack_idx and len(_IDK_ACK_POOL) > 1:
+            _idx = random.randint(0, len(_IDK_ACK_POOL) - 1)
+        _last_idk_ack_idx = _idx
+        return _IDK_ACK_POOL[_idx]
     if mode == "REFRAME":
         return "Let me rephrase that. Think about a specific situation you have been in. What decisions did you make and what trade-offs were involved?"
     return "Let us continue."
@@ -683,6 +741,7 @@ async def generate_interviewer_turn(
     next_question: str,
     settings: Any,
     cv_summary: str = "",
+    interview_stage: str = "technical",
     on_generator_sentence_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> dict[str, Any]:
     """Run classifier call then generator call and update persistent interviewer state."""
@@ -767,6 +826,7 @@ async def generate_interviewer_turn(
         "recent_turns": recent_turns,
         "previous_mode": previous_mode_norm,
         "seed_flags": active_flags,
+        "interview_stage": interview_stage,
     }
 
     # Local provider: skip LLM classifier — evaluator adapter is fine-tuned for
@@ -829,6 +889,10 @@ async def generate_interviewer_turn(
     if "contradiction" in cls_flags:
         mode = "CONFRONT"
 
+    # B1: ACKNOWLEDGE_IDK must never anchor — candidate said nothing citable
+    if mode == "ACKNOWLEDGE_IDK":
+        follow_up_anchor = ""
+
     redirect_count = int(q_stats.get("redirects", 0)) + (1 if mode == "REDIRECT" else 0)
     if mode == "REDIRECT":
         q_stats["redirects"] = int(q_stats.get("redirects", 0)) + 1
@@ -890,7 +954,22 @@ async def generate_interviewer_turn(
     if skip_generator:
         logger.info("Skipping generator LLM for local provider + mode=%s", mode)
 
-    if provider is not None and not skip_generator:
+    # C1/C2/C6: ACKNOWLEDGE_IDK — use phrase pool rather than generator
+    if mode == "ACKNOWLEDGE_IDK":
+        idk_total = int(state.get("idk_count", 0))
+        if _detect_frustrated_idk(transcript):          # C2: frustrated candidate
+            spoken_response = "Of course — let us move on."
+        elif idk_total >= 3:                            # C6: empathy escalation
+            spoken_response = "These are tough questions — you are doing fine, let us keep going."
+        else:                                           # C1: rotate pool
+            global _last_idk_ack_idx
+            _idx = random.randint(0, len(_IDK_ACK_POOL) - 1)
+            while _idx == _last_idk_ack_idx and len(_IDK_ACK_POOL) > 1:
+                _idx = random.randint(0, len(_IDK_ACK_POOL) - 1)
+            _last_idk_ack_idx = _idx
+            spoken_response = _IDK_ACK_POOL[_idx]
+
+    if provider is not None and not skip_generator and not spoken_response:
         try:
             gen_model = getattr(settings, "interviewer_generator_model", "")
             gen_cfg = _override_model(provider, gen_model)
@@ -984,6 +1063,24 @@ async def generate_interviewer_turn(
     # Keep TTS-friendly output constraints.
     spoken_response = re.sub(r"\s+", " ", spoken_response).strip()
     spoken_response = spoken_response.replace(":", "")
+
+    # B2: Strip IDK preamble if it leaked into a non-IDK mode response
+    if mode != "ACKNOWLEDGE_IDK" and spoken_response:
+        _IDK_OPENS = (
+            "that is okay, not everyone", "that's okay, not everyone",
+            "no worries at all", "totally fine", "not a problem at all",
+            "completely fine", "no problem",
+        )
+        _sr_low = spoken_response.lower()
+        for _op in _IDK_OPENS:
+            if _sr_low.startswith(_op):
+                _dot = spoken_response.find(". ")
+                if 0 < _dot < 120:
+                    spoken_response = spoken_response[_dot + 2:].strip()
+                else:
+                    spoken_response = spoken_response[len(_op):].strip().lstrip(",. ")
+                logger.info("B2: Stripped IDK preamble from %s response", mode)
+                break
 
     turn_record = {
         "question": _normalize_text(current_question),

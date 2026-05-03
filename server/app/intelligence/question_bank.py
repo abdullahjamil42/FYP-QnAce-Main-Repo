@@ -242,13 +242,12 @@ def generate_question_set(
     """Generate a question set based on job role and interview type.
 
     Returns a list of question dicts with 'text', 'type', 'difficulty', etc.
-    Order: behavioral → technical (role-specific + DSA shuffled) → closing.
+    Order: technical (role-specific first) → behavioral → closing.
 
-    Quick:     1 behavioral + 3 role + 4 DSA + 1 closing = ~9
-    Extensive: 2 behavioral + 6 role + 9 DSA + 2 closing = ~19
+    Quick:     1 behavioral + 3 role + 1 closing = ~5
+    Extensive: 2 behavioral + 6 role + 2 closing = ~10
     """
     rng = random.Random(seed)
-    all_dsa = _load_dsa_questions()
     role_key = job_role if job_role in ROLE_SPECIFIC_QUESTIONS else "software_engineer"
     role_questions = list(ROLE_SPECIFIC_QUESTIONS[role_key])
     behavioral_pool = list(BEHAVIORAL_QUESTIONS)
@@ -258,15 +257,11 @@ def generate_question_set(
     if interview_type == "quick":
         behavioral_count = 1
         role_count = 2 if has_cv_questions else 3
-        dsa_count = 3 if has_cv_questions else 4
         closing_count = 1
-        dsa_difficulties = {"Easy", "Medium"}
     else:
         behavioral_count = 2
         role_count = 4 if has_cv_questions else 6
-        dsa_count = 7 if has_cv_questions else 9
         closing_count = 2
-        dsa_difficulties = {"Medium", "Hard"}
 
     # Behavioral (front)
     rng.shuffle(behavioral_pool)
@@ -279,17 +274,10 @@ def generate_question_set(
         for q in role_questions[:role_count]
     ]
 
-    filtered_dsa = [q for q in all_dsa if q.get("difficulty", "") in dsa_difficulties]
-    if not filtered_dsa:
-        filtered_dsa = all_dsa
-
-    rng.shuffle(filtered_dsa)
-    selected_dsa = [_format_dsa_question(q) for q in filtered_dsa[:dsa_count]]
-
     # CV-personalised questions (if provided) sit alongside role questions
     selected_cv = [_format_cv_question(q, role_key) for q in (cv_questions or [])]
 
-    technical = selected_role + selected_cv + selected_dsa
+    technical = selected_role + selected_cv
     rng.shuffle(technical)
 
     # Closing (end, never shuffled into the middle)

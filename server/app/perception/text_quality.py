@@ -288,6 +288,13 @@ async def classify_quality_llm(text: str, settings: Any) -> TextQualityResult:
         import httpx
 
         base_url = getattr(settings, "local_llm_base_url", "http://localhost:8081")
+        if not base_url.startswith(("http://", "https://")):
+            logger.warning(
+                "local_llm_base_url %r is missing an http/https scheme — prepending 'http://'. "
+                "Fix LOCAL_LLM_BASE_URL in .env to silence this warning.",
+                base_url,
+            )
+            base_url = "http://" + base_url
         url = f"{base_url.rstrip('/')}/v1/chat/completions"
 
         api_key = getattr(settings, "local_llm_api_key", "") or ""
