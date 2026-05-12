@@ -2,12 +2,44 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useDataChannel } from "@/hooks/useDataChannel";
+import { useDataChannel, type PerceptionEvent, type TranscriptEvent } from "@/hooks/useDataChannel";
 import { useWebRTC } from "@/hooks/useWebRTC";
 import VideoCanvas from "@/components/VideoCanvas";
 import CodingRoundView from "@/components/coding/CodingRoundView";
 import { loadSetupConfig, persistSession } from "@/lib/interview-session-store";
 import { jobRoles } from "@/lib/mock-data";
+
+// ── Module-level constants ──────────────────────────────────────────────────
+const EMOTION_SENTIMENT: Record<string, number> = {
+  excellent: 95, confident: 88, composed: 82, engaged: 78, happy: 80,
+  positive: 80, good: 75, neutral: 50, average: 45,
+  uncertain: 30, nervous: 28, anxious: 22, stressed: 15, poor: 12,
+};
+
+const SCORE_CRITERIA: Record<string, string[]> = {
+  Content:  ["Relevance to question", "Technical depth", "Answer structure", "Use of examples"],
+  Delivery: ["Speaking pace (WPM)", "Clarity of diction", "Filler word frequency", "Confidence markers"],
+  Composure:["Pause frequency", "Hesitation patterns", "Vocal stability", "Emotional consistency"],
+};
+
+const EMOTION_COLORS: Record<string, { bg: string; text: string; ring: string; dot: string }> = {
+  confident: { bg: "bg-emerald-500/20", text: "text-emerald-200", ring: "ring-emerald-400", dot: "#34d399" },
+  composed:  { bg: "bg-emerald-500/20", text: "text-emerald-200", ring: "ring-emerald-400", dot: "#34d399" },
+  engaged:   { bg: "bg-blue-500/20",    text: "text-blue-200",    ring: "ring-blue-400",    dot: "#60a5fa" },
+  happy:     { bg: "bg-yellow-500/20",  text: "text-yellow-200",  ring: "ring-yellow-400",  dot: "#fbbf24" },
+  positive:  { bg: "bg-emerald-500/20", text: "text-emerald-200", ring: "ring-emerald-400", dot: "#34d399" },
+  good:      { bg: "bg-emerald-500/20", text: "text-emerald-200", ring: "ring-emerald-400", dot: "#34d399" },
+  excellent: { bg: "bg-sky-500/20",     text: "text-sky-200",     ring: "ring-sky-400",     dot: "#38bdf8" },
+  neutral:   { bg: "bg-slate-500/20",   text: "text-slate-200",   ring: "ring-slate-400",   dot: "#94a3b8" },
+  average:   { bg: "bg-slate-500/20",   text: "text-slate-200",   ring: "ring-slate-400",   dot: "#94a3b8" },
+  uncertain: { bg: "bg-amber-500/20",   text: "text-amber-200",   ring: "ring-amber-400",   dot: "#f59e0b" },
+  nervous:   { bg: "bg-amber-500/20",   text: "text-amber-200",   ring: "ring-amber-400",   dot: "#f59e0b" },
+  anxious:   { bg: "bg-amber-500/20",   text: "text-amber-200",   ring: "ring-amber-400",   dot: "#f59e0b" },
+  stressed:  { bg: "bg-red-500/20",     text: "text-red-200",     ring: "ring-red-400",     dot: "#f87171" },
+  poor:      { bg: "bg-red-500/20",     text: "text-red-200",     ring: "ring-red-400",     dot: "#f87171" },
+};
+const EMOTION_DEFAULT_COLORS = { bg: "bg-slate-500/20", text: "text-slate-200", ring: "ring-slate-400", dot: "#94a3b8" };
+// ────────────────────────────────────────────────────────────────────────────
 
 export default function LiveSessionRoom() {
   const router = useRouter();
@@ -38,6 +70,8 @@ export default function LiveSessionRoom() {
     currentQuestion,
     questionHistory,
     interviewEnd,
+    latestTranscript,
+    codingStart,
     sendCommand,
     sendCodingDebrief,
     clearTranscripts,
@@ -49,11 +83,13 @@ export default function LiveSessionRoom() {
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(true);
   const [countdown, setCountdown] = useState<number>(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [perceptionHistory, setPerceptionHistory] = useState<{ vocal: number[]; face: number[]; tone: number[] }>({ vocal: [], face: [], tone: [] });
+  const [autoScrollPaused, setAutoScrollPaused] = useState(false);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
   const isConnected = state === "connected";
   const isConnecting = state === "connecting";
 
-  const avatarVideoRef = useRef<HTMLVideoElement>(null);
   const ttsAudioRef = useRef<HTMLAudioElement>(null);
 
   const setup = loadSetupConfig();
@@ -63,12 +99,6 @@ export default function LiveSessionRoom() {
   useEffect(() => {
     // No timer — phases are unlimited
   }, [currentPhase]);
-
-  useEffect(() => {
-    if (avatarVideoRef.current && remoteVideoStream) {
-      avatarVideoRef.current.srcObject = remoteVideoStream;
-    }
-  }, [remoteVideoStream]);
 
   useEffect(() => {
     const audioEl = ttsAudioRef.current;
@@ -135,6 +165,13 @@ export default function LiveSessionRoom() {
     startedAtRef.current = null;
   }, [clearTranscripts, stop]);
 
+  const handleTranscriptScroll = useCallback(() => {
+    const el = transcriptScrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 24;
+    setAutoScrollPaused(!atBottom);
+  }, []);
+
   const handleStopAndSave = useCallback(async () => {
     if (isSavingRef.current) return;
     isSavingRef.current = true;
@@ -179,6 +216,25 @@ export default function LiveSessionRoom() {
     }
   }, [interviewEnd, isConnected, handleStopAndSave]);
 
+  // Rolling perception history for sparklines
+  useEffect(() => {
+    if (!perception) return;
+    const toScore = (e: string) => EMOTION_SENTIMENT[e.toLowerCase()] ?? 50;
+    setPerceptionHistory((prev) => ({
+      vocal: [...prev.vocal, toScore(perception.vocal_emotion)].slice(-30),
+      face:  [...prev.face,  toScore(perception.face_emotion)].slice(-30),
+      tone:  [...prev.tone,  toScore(perception.text_quality_label)].slice(-30),
+    }));
+  }, [perception]);
+
+  // Auto-scroll transcript container (not the page)
+  useEffect(() => {
+    if (!autoScrollPaused) {
+      const el = transcriptScrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }, [transcripts, autoScrollPaused]);
+
   const phaseLabel = currentPhase?.phase ?? "idle";
   const isThinking = phaseLabel === "thinking";
   const isAnswering = phaseLabel === "answering";
@@ -187,11 +243,14 @@ export default function LiveSessionRoom() {
   const totalQuestions = currentQuestion?.total ?? 0;
   const currentVoice = currentQuestion?.voice ?? "male";
 
-  const codingProblemId = sp.get("problemId") || "";
+  // URL-param coding round (manual/legacy) or server-authoritative (data-channel)
+  const urlCodingProblemId = sp.get("problemId") || "";
+  const serverCodingProblemId = codingStart?.problem_id ?? "";
+  const codingProblemId = serverCodingProblemId || urlCodingProblemId;
   const showCodingOverlay =
-    sp.get("coding") === "1" &&
     codingProblemId.length > 0 &&
-    Boolean(sessionId);
+    Boolean(sessionId) &&
+    (Boolean(codingStart) || (sp.get("coding") === "1" && urlCodingProblemId.length > 0));
 
   return (
     <>
@@ -313,16 +372,10 @@ export default function LiveSessionRoom() {
               </div>
             )}
 
-            {/* Avatar PiP */}
-            <div className="card-glow absolute right-6 top-6 z-10 w-52 overflow-hidden rounded-2xl border border-white/20 bg-black/30 backdrop-blur-sm">
-              {remoteVideoStream ? (
-                <video ref={avatarVideoRef} autoPlay playsInline muted className="h-32 w-full object-cover" />
-              ) : (
-                <div className="flex h-32 items-center justify-center text-4xl">
-                  {currentVoice === "female" ? "👩‍💼" : "👨‍💼"}
-                </div>
-              )}
-              <div className="flex items-center justify-between px-3 py-2 text-xs text-qace-muted">
+            {/* AI Interviewer Avatar PiP */}
+            <div className="card-glow absolute right-6 top-6 z-10 w-52 rounded-2xl border border-white/20 bg-black/30 backdrop-blur-sm">
+              <AIAvatarCard phase={phaseLabel} voice={currentVoice ?? "male"} />
+              <div className="flex items-center justify-between border-t border-white/10 px-3 py-2 text-xs text-qace-muted">
                 <span>Interviewer {currentVoice === "female" ? "2" : "1"}</span>
                 <span className={currentVoice === "female" ? "text-pink-300" : "text-blue-300"}>
                   {currentVoice === "female" ? "♀ Female" : "♂ Male"}
@@ -402,12 +455,12 @@ export default function LiveSessionRoom() {
             </div>
             {scores ? (
               <div className="space-y-3 text-sm">
-                <ScoreRow label="Content" value={scores.content} />
-                <ScoreRow label="Delivery" value={scores.delivery} />
-                <ScoreRow label="Composure" value={scores.composure} />
+                <RichScoreRow label="Content"  value={scores.content}  verdict={makeVerdict("Content",  scores.content,  perception, latestTranscript)} />
+                <RichScoreRow label="Delivery" value={scores.delivery} verdict={makeVerdict("Delivery", scores.delivery, perception, latestTranscript)} />
+                <RichScoreRow label="Composure" value={scores.composure} verdict={makeVerdict("Composure", scores.composure, perception, latestTranscript)} />
                 <div className="card-glow rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-center">
                   <div className="text-3xl font-semibold text-qace-accent">{scores.final.toFixed(1)}</div>
-                  <div className="text-xs text-qace-muted">Overall Score</div>
+                  <div className="text-xs text-qace-muted">Weighted average · updated live</div>
                 </div>
               </div>
             ) : (
@@ -419,10 +472,10 @@ export default function LiveSessionRoom() {
           {perception && isConnected && (
             <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
               <h2 className="mb-3 text-base font-semibold">Live Emotion</h2>
-              <div className="flex flex-wrap gap-2">
-                <EmotionBadge label="Voice" emotion={perception.vocal_emotion} />
-                <EmotionBadge label="Face" emotion={perception.face_emotion} />
-                <EmotionBadge label="Text" emotion={perception.text_quality_label} />
+              <div className="space-y-2.5">
+                <AnimatedEmotionBadge label="Voice" emotion={perception.vocal_emotion}      history={perceptionHistory.vocal} />
+                <AnimatedEmotionBadge label="Face"  emotion={perception.face_emotion}       history={perceptionHistory.face} />
+                <AnimatedEmotionBadge label="Tone"  emotion={perception.text_quality_label} history={perceptionHistory.tone} />
               </div>
             </section>
           )}
@@ -430,6 +483,22 @@ export default function LiveSessionRoom() {
           {/* Question Progress */}
           <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
             <h2 className="mb-3 text-base font-semibold">Question Progress</h2>
+            {totalQuestions > 0 && (
+              <div className="mb-3 flex gap-1">
+                {Array.from({ length: totalQuestions }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`h-2 flex-1 rounded-full transition-colors duration-300 ${
+                      i < questionIndex
+                        ? "bg-emerald-500/60"
+                        : i === questionIndex
+                          ? "bg-emerald-400 shadow-[0_0_6px_#34d399]"
+                          : "bg-white/10"
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
             <div className="space-y-2 text-sm">
               {questionHistory.length === 0 ? (
                 <p className="text-sm italic text-qace-muted">Questions will appear here as the interview progresses.</p>
@@ -461,15 +530,38 @@ export default function LiveSessionRoom() {
           {/* Transcript */}
           {showTranscriptPanel ? (
             <section className="card-glow rounded-2xl border border-white/20 bg-white/5 p-4 shadow-xl shadow-black/20">
-              <h2 className="mb-2 text-base font-semibold">Transcript</h2>
-              <div className="max-h-44 space-y-2 overflow-y-auto pr-1 text-sm">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-base font-semibold">Transcript</h2>
+                {autoScrollPaused && (
+                  <button
+                    type="button"
+                    onClick={() => setAutoScrollPaused(false)}
+                    className="flex items-center gap-1 rounded-lg bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
+                  >
+                    ↓ Resume
+                  </button>
+                )}
+              </div>
+              {latestTranscript && (
+                <div className="mb-2 flex gap-4 rounded-lg bg-white/5 px-3 py-1.5 text-xs">
+                  <span className="font-mono font-medium text-white/80">{Math.round(latestTranscript.wpm)} WPM</span>
+                  <span className={`font-mono ${latestTranscript.filler_count > 2 ? "text-amber-300" : "text-white/45"}`}>
+                    {latestTranscript.filler_count} filler{latestTranscript.filler_count !== 1 ? "s" : ""}
+                  </span>
+                </div>
+              )}
+              <div
+                ref={transcriptScrollRef}
+                onScroll={handleTranscriptScroll}
+                className="max-h-72 space-y-2 overflow-y-auto pr-1 text-sm"
+              >
                 {transcripts.length === 0 ? (
                   <p className="italic text-qace-muted">Transcript snippets will appear here during your answer.</p>
                 ) : (
-                  transcripts.slice(-12).map((t, i) => (
+                  transcripts.slice(-20).map((t, i) => (
                     <div key={i} className="rounded-lg bg-black/25 p-2.5">
                       <p>{t.text}</p>
-                      <p className="mt-1 text-xs text-qace-muted">{t.wpm} WPM · {t.filler_count} fillers</p>
+                      <p className="mt-0.5 text-[10px] text-white/30">{Math.round(t.wpm)} WPM · {t.filler_count} fillers</p>
                     </div>
                   ))
                 )}
@@ -503,42 +595,207 @@ export default function LiveSessionRoom() {
   );
 }
 
-function ScoreRow({ label, value }: { label: string; value: number }) {
-  const safeValue = Math.max(0, Math.min(value, 100));
+// ── AI Interviewer Avatar ────────────────────────────────────────────────
+
+function AIAvatarCard({ phase, voice }: { phase: string; voice: string }) {
+  const isSpeaking = phase === "speaking";
+  const isThinking = phase === "thinking" || phase === "evaluating" || phase === "listening";
+
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-qace-muted">{label}</span>
-        <span className="font-semibold">{safeValue.toFixed(1)}</span>
+    <div className="relative flex h-36 w-full items-center justify-center overflow-hidden">
+      {/* Radial backdrop glow */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(56,189,248,0.08)_0%,transparent_70%)]" />
+
+      {/* Sonar rings — speaking only */}
+      {isSpeaking && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="avatar-ring-1 absolute h-14 w-14 rounded-full border-2 border-blue-400/65" />
+          <div className="avatar-ring-2 absolute h-14 w-14 rounded-full border-2 border-cyan-400/45" />
+          <div className="avatar-ring-3 absolute h-14 w-14 rounded-full border border-sky-300/25" />
+        </div>
+      )}
+
+      {/* Icon frame */}
+      <div
+        className={[
+          "relative z-10 flex h-14 w-14 items-center justify-center rounded-full",
+          "border border-blue-400/40 bg-gradient-to-br from-blue-600/20 to-indigo-700/20",
+          isSpeaking
+            ? "shadow-[0_0_22px_rgba(56,189,248,0.40)]"
+            : "shadow-[0_0_12px_rgba(56,189,248,0.12)]",
+          isThinking ? "avatar-breathe" : "",
+        ].join(" ")}
+      >
+        {/* Stylised AI head glyph */}
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-9 w-9">
+          {/* Head shell */}
+          <rect x="9" y="10" width="30" height="24" rx="7" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.55)" strokeWidth="1.4" />
+          {/* Left eye */}
+          <rect x="14" y="17" width="7" height="5" rx="2" fill="rgba(56,189,248,0.70)" />
+          {/* Right eye */}
+          <rect x="27" y="17" width="7" height="5" rx="2" fill="rgba(56,189,248,0.70)" />
+          {/* Mouth */}
+          <rect x="16" y="27" width="16" height="2.5" rx="1.25" fill="rgba(34,211,238,0.50)" />
+          {/* Antenna stem */}
+          <line x1="24" y1="10" x2="24" y2="5" stroke="rgba(56,189,248,0.45)" strokeWidth="1.5" strokeLinecap="round" />
+          {/* Antenna tip */}
+          <circle cx="24" cy="4" r="1.8" fill="rgba(56,189,248,0.65)" />
+          {/* Left ear port */}
+          <rect x="6" y="17" width="3" height="8" rx="1.5" fill="rgba(56,189,248,0.20)" stroke="rgba(56,189,248,0.35)" strokeWidth="1" />
+          {/* Right ear port */}
+          <rect x="39" y="17" width="3" height="8" rx="1.5" fill="rgba(56,189,248,0.20)" stroke="rgba(56,189,248,0.35)" strokeWidth="1" />
+          {/* Neck */}
+          <rect x="20" y="34" width="8" height="4" rx="2" fill="rgba(56,189,248,0.18)" stroke="rgba(56,189,248,0.30)" strokeWidth="1" />
+        </svg>
       </div>
-      <div className="h-2 rounded-full bg-white/10">
-        <div className="h-2 rounded-full bg-gradient-to-r from-qace-accent to-qace-primary" style={{ width: `${safeValue}%` }} />
-      </div>
+
+      {/* Mic badge — only when speaking */}
+      {isSpeaking && (
+        <div className="absolute bottom-3 right-[calc(50%-34px)] z-20 flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 shadow-[0_0_8px_rgba(56,189,248,0.6)]">
+          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-white">
+            <path d="M8 1a2 2 0 0 0-2 2v4a2 2 0 1 0 4 0V3a2 2 0 0 0-2-2zm0 10a4 4 0 0 1-4-4H2a6 6 0 0 0 5 5.92V15H5v1h6v-1H9v-2.08A6 6 0 0 0 14 7h-2a4 4 0 0 1-4 4z" />
+          </svg>
+        </div>
+      )}
+
+      {/* Thinking dots */}
+      {isThinking && (
+        <div className="absolute bottom-3 flex gap-1">
+          {([0, 0.25, 0.5] as number[]).map((delay) => (
+            <div
+              key={delay}
+              className="h-1.5 w-1.5 rounded-full bg-cyan-400/60"
+              style={{ animation: `avatarBreathe 1.2s ease-in-out ${delay}s infinite` }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-const EMOTION_COLORS: Record<string, string> = {
-  confident: "bg-emerald-500/20 text-emerald-200",
-  composed: "bg-emerald-500/20 text-emerald-200",
-  engaged: "bg-blue-500/20 text-blue-200",
-  happy: "bg-yellow-500/20 text-yellow-200",
-  positive: "bg-emerald-500/20 text-emerald-200",
-  neutral: "bg-slate-500/20 text-slate-200",
-  nervous: "bg-amber-500/20 text-amber-200",
-  anxious: "bg-amber-500/20 text-amber-200",
-  stressed: "bg-red-500/20 text-red-200",
-  good: "bg-emerald-500/20 text-emerald-200",
-  average: "bg-amber-500/20 text-amber-200",
-  poor: "bg-red-500/20 text-red-200",
-};
+// ── Score helpers ─────────────────────────────────────────────────────────
 
-function EmotionBadge({ label, emotion }: { label: string; emotion: string }) {
-  const color = EMOTION_COLORS[emotion.toLowerCase()] ?? "bg-slate-500/20 text-slate-200";
+function getScoreBand(v: number): { label: string; color: string; bar: string } {
+  if (v >= 90) return { label: "Excellent",  color: "text-sky-300",     bar: "from-sky-500 to-sky-400" };
+  if (v >= 75) return { label: "Good",       color: "text-emerald-300", bar: "from-emerald-500 to-emerald-400" };
+  if (v >= 60) return { label: "Developing", color: "text-amber-300",   bar: "from-amber-500 to-amber-400" };
+  return              { label: "Needs Work", color: "text-red-300",     bar: "from-red-500 to-red-400" };
+}
+
+function makeVerdict(
+  label: string,
+  value: number,
+  perception: PerceptionEvent | null,
+  latest: TranscriptEvent | null,
+): string {
+  if (label === "Content") {
+    if (value >= 90) return "Strong technical depth and clear structure.";
+    if (value >= 75) return "Good coverage — a concrete example would strengthen the answer.";
+    return "Focus on structuring responses: situation → approach → result.";
+  }
+  if (label === "Delivery") {
+    if (latest) {
+      const wpm = Math.round(latest.wpm);
+      const f = latest.filler_count;
+      return `${wpm} WPM · ${f} filler word${f !== 1 ? "s" : ""} detected.`;
+    }
+    if (value >= 80) return "Clear, well-paced delivery.";
+    return "Work on reducing filler words and steadying pace.";
+  }
+  if (label === "Composure") {
+    if (perception) {
+      const vocal = perception.vocal_emotion.toLowerCase();
+      const face  = perception.face_emotion.toLowerCase();
+      return `Voice ${vocal}, face ${face} — ${value >= 75 ? "projecting composure" : "some tension detected"}.`;
+    }
+    if (value >= 80) return "Composed and steady throughout.";
+    return "Some hesitation or tension detected.";
+  }
+  return "";
+}
+
+function RichScoreRow({ label, value, verdict }: { label: string; value: number; verdict: string }) {
+  const safeValue = Math.max(0, Math.min(value, 100));
+  const band = getScoreBand(safeValue);
+  const criteria = SCORE_CRITERIA[label] ?? [];
   return (
-    <div className={`rounded-full px-3 py-1.5 text-xs font-medium ${color}`}>
-      <span className="text-white/60">{label}:</span>{" "}
-      <span className="capitalize">{emotion}</span>
+    <div className="group relative space-y-1.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <span className="text-qace-muted">{label}</span>
+          <span className="cursor-help text-[10px] text-white/25">ⓘ</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-semibold ${band.color}`}>{band.label}</span>
+          <span className="text-xs text-white/35">{safeValue.toFixed(0)}</span>
+        </div>
+      </div>
+      {/* Hover tooltip */}
+      <div className="pointer-events-none absolute left-0 top-7 z-20 hidden w-52 rounded-xl border border-white/10 bg-[#0d1425]/95 p-3 shadow-xl group-hover:block">
+        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-qace-muted">Measuring</p>
+        <ul className="space-y-0.5">
+          {criteria.map((c) => (
+            <li key={c} className="text-xs text-white/65">· {c}</li>
+          ))}
+        </ul>
+      </div>
+      <div className="h-2 rounded-full bg-white/10">
+        <div
+          className={`h-2 rounded-full bg-gradient-to-r ${band.bar} transition-[width] duration-500`}
+          style={{ width: `${safeValue}%` }}
+        />
+      </div>
+      {verdict && <p className="text-[11px] italic text-white/40">{verdict}</p>}
+    </div>
+  );
+}
+
+// ── Emotion helpers ────────────────────────────────────────────────────────
+
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  if (values.length < 2) return <div className="h-3 w-[50px]" />;
+  const W = 50, H = 12;
+  const pts = values
+    .map((v, i) => {
+      const x = ((i / (values.length - 1)) * W).toFixed(1);
+      const y = (H - (Math.max(0, Math.min(v, 100)) / 100) * H).toFixed(1);
+      return `${x},${y}`;
+    })
+    .join(" ");
+  return (
+    <svg width={W} height={H} className="overflow-visible opacity-60">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function AnimatedEmotionBadge({ label, emotion, history }: { label: string; emotion: string; history: number[] }) {
+  const key = emotion.toLowerCase();
+  const colors = EMOTION_COLORS[key] ?? EMOTION_DEFAULT_COLORS;
+  const prevRef = useRef<string>("");
+  const [flashing, setFlashing] = useState(false);
+
+  useEffect(() => {
+    if (prevRef.current && prevRef.current !== key) {
+      setFlashing(true);
+      const t = setTimeout(() => setFlashing(false), 700);
+      return () => clearTimeout(t);
+    }
+    prevRef.current = key;
+  }, [key]);
+
+  return (
+    <div className="flex items-center justify-between">
+      <div
+        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-300 ${colors.bg} ${colors.text} ${
+          flashing ? `ring-2 ${colors.ring} ring-offset-1 ring-offset-[#0d152d]` : ""
+        }`}
+      >
+        <span className="text-white/45">{label}:</span>
+        <span className="capitalize">{emotion}</span>
+      </div>
+      <Sparkline values={history} color={colors.dot} />
     </div>
   );
 }

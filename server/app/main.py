@@ -36,6 +36,13 @@ async def lifespan(app: FastAPI):
     )
     logger.info("Q&Ace server starting …")
 
+    # ── Security: auth bypass must not be active in production ──
+    if not settings.require_auth and settings.env.lower() not in ("development", "dev", "test"):
+        raise RuntimeError(
+            f"QACE_REQUIRE_AUTH=false is not allowed in env={settings.env!r}. "
+            "Set QACE_REQUIRE_AUTH=true for staging/production."
+        )
+
     if settings.normalized_llm_provider == "local":
         if settings.local_llm_base_url.strip():
             ok, detail = check_local_llm_endpoint(settings.local_llm_base_url)

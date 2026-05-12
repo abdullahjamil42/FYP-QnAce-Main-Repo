@@ -29,6 +29,21 @@ h6 {
   background-size: 32px 32px;
 }
 
+/* ── AI Avatar animations ────────────────────────────────────────────── */
+@keyframes avatarSonar {
+  0%   { transform: scale(1);   opacity: 0.75; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes avatarBreathe {
+  0%, 100% { opacity: 0.55; }
+  50%       { opacity: 1; }
+}
+.avatar-ring-1 { animation: avatarSonar 2.1s ease-out infinite; }
+.avatar-ring-2 { animation: avatarSonar 2.1s ease-out 0.7s infinite; }
+.avatar-ring-3 { animation: avatarSonar 2.1s ease-out 1.4s infinite; }
+.avatar-breathe { animation: avatarBreathe 2.8s ease-in-out infinite; }
+/* ──────────────────────────────────────────────────────────────────────── */
+
 @keyframes fadeUp {
   from {
     opacity: 0;

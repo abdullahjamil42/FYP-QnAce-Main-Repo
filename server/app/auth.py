@@ -47,6 +47,7 @@ async def require_user(
     settings = get_settings()
 
     if not settings.require_auth:
+        logger.warning("⚠ AUTH BYPASS ACTIVE — QACE_REQUIRE_AUTH=false; dev-only")
         # Dev mode: auth optional, extract user_id if token present
         if creds and creds.credentials and settings.supabase_jwt_secret:
             try:

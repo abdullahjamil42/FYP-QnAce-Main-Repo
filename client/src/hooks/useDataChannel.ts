@@ -103,7 +103,8 @@ export type ChannelEvent =
   | ({ type: "question" } & QuestionEvent)
   | ({ type: "interviewer_feedback" } & InterviewerFeedbackEvent)
   | ({ type: "interviewer_prompt" } & { subtype: "nonverbal" })
-  | ({ type: "interview_end" } & InterviewEndEvent);
+  | ({ type: "interview_end" } & InterviewEndEvent)
+  | ({ type: "coding_start" } & { problem_id: string; source: string });
 
 export function useDataChannel(
   dataChannel: RTCDataChannel | null,
@@ -120,6 +121,7 @@ export function useDataChannel(
   const [questionHistory, setQuestionHistory] = useState<QuestionEvent[]>([]);
   const [interviewEnd, setInterviewEnd] = useState<InterviewEndEvent | null>(null);
   const [nonverbalPromptCount, setNonverbalPromptCount] = useState(0);
+  const [codingStart, setCodingStart] = useState<{ problem_id: string; source: string } | null>(null);
 
   useEffect(() => {
     if (!dataChannel) return;
@@ -218,6 +220,9 @@ export function useDataChannel(
               avg_total_score: (parsed as any).avg_total_score ?? 0,
             });
             break;
+          case "coding_start":
+            setCodingStart({ problem_id: parsed.problem_id, source: parsed.source });
+            break;
         }
       } catch {
         // Non-JSON message — ignore
@@ -288,6 +293,7 @@ export function useDataChannel(
     questionHistory,
     interviewEnd,
     nonverbalPromptCount,
+    codingStart,
     sendCommand,
     sendCodingDebrief,
     clearTranscripts,
