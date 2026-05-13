@@ -30,10 +30,9 @@ RUN huggingface-cli download abdullahjamil42/QnAce-Voice-Model \
     --local-dir-use-symlinks False
 
 # BERT text-quality ONNX (abdullahjamil42/QnAce-Text-Quality, ~418 MB)
-# Uncomment after running: huggingface-cli upload abdullahjamil42/QnAce-Text-Quality models/text-quality/ .
-# RUN huggingface-cli download abdullahjamil42/QnAce-Text-Quality \
-#     --local-dir models/text-quality \
-#     --local-dir-use-symlinks False
+RUN huggingface-cli download abdullahjamil42/QnAce-Text-Quality \
+    --local-dir models/text-quality \
+    --local-dir-use-symlinks False
 
 # Copy server code
 COPY . .
