@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import InteractiveNetworkBg from "@/components/InteractiveNetworkBg";
 import BrandLogo from "@/components/BrandLogo";
-import { getSupabaseClient } from "@/lib/supabase";
+import Footer from "@/components/Footer";
+import { clearLoginMarker, getSupabaseClient } from "@/lib/supabase";
 
 const benefitCards = [
   {
@@ -142,6 +143,7 @@ export default function LandingPage() {
       return;
     }
     await client.auth.signOut();
+    clearLoginMarker();
     setMenuOpen(false);
   }
 
@@ -152,10 +154,10 @@ export default function LandingPage() {
       <div className="liquid-noise" />
       <div className="landing-scroll-shade" style={{ opacity: scrollShadeOpacity }} />
 
-      <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-6 md:px-8">
-        <Link href="/" className="flex items-center gap-2">
-          <BrandLogo className="h-9 w-auto text-white" />
-          <span className="text-xl font-semibold tracking-tight text-white">
+      <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-4 sm:px-6 sm:py-6 md:px-8">
+        <Link href="/" className="flex shrink-0 items-center gap-2">
+          <BrandLogo className="h-8 w-auto text-white sm:h-9" />
+          <span className="text-lg font-semibold tracking-tight text-white sm:text-xl">
             Q&A<span className="text-sky-400">ce</span>
           </span>
         </Link>
@@ -164,16 +166,24 @@ export default function LandingPage() {
             <button
               onClick={() => setMenuOpen((open) => !open)}
               className="flex items-center gap-2 rounded-full px-2 py-1.5 text-sm text-white transition hover:text-sky-200"
+              aria-label="Open profile menu"
             >
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-qace-primary text-xs font-semibold text-white">
                 {initials}
               </span>
-              <span className="max-w-28 truncate pr-2">{profileLabel}</span>
+              <span className="hidden max-w-28 truncate pr-2 sm:inline">{profileLabel}</span>
             </button>
             {menuOpen ? (
               <div className="app-frosted absolute right-0 top-12 w-56 rounded-xl p-2">
                 <p className="px-2 py-1 text-xs text-qace-muted">Signed in as</p>
                 <p className="truncate px-2 pb-2 text-sm text-white">{user.email}</p>
+                <Link
+                  href="/setup"
+                  onClick={() => setMenuOpen(false)}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white transition hover:bg-white/10"
+                >
+                  Open App
+                </Link>
                 <button
                   onClick={handleSignOut}
                   className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-200 transition hover:bg-red-500/20"
@@ -187,13 +197,13 @@ export default function LandingPage() {
           <div className="flex items-center gap-2">
             <Link
               href="/login"
-              className="rounded-full border border-white/25 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+              className="rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/15 sm:px-4 sm:py-2"
             >
               Login
             </Link>
             <Link
               href="/signup"
-              className="rounded-full bg-qace-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
+              className="rounded-full bg-qace-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-indigo-400 sm:px-4 sm:py-2"
             >
               Signup
             </Link>
@@ -201,19 +211,19 @@ export default function LandingPage() {
         )}
       </header>
 
-      <section className="relative z-10 mx-auto flex min-h-[calc(100vh-80px)] w-full max-w-6xl items-center px-5 pb-8 pt-6 md:px-8 md:pt-10">
-        <div data-reveal className="reveal space-y-6 text-center">
-          <p className="inline-flex rounded-full border border-cyan-300/35 px-3 py-1 text-xs font-semibold tracking-wide text-cyan-100">
-            AI powered interview coach 
+      <section className="relative z-10 mx-auto flex min-h-[calc(100vh-80px)] w-full max-w-6xl items-center px-4 pb-10 pt-6 sm:px-6 md:px-8 md:pt-10">
+        <div data-reveal className="reveal mx-auto w-full space-y-5 text-center sm:space-y-6">
+          <p className="inline-flex rounded-full border border-cyan-300/35 px-3 py-1 text-[11px] font-semibold tracking-wide text-cyan-100 sm:text-xs">
+            AI powered interview coach
           </p>
-          <h1 className="text-4xl font-semibold leading-tight md:text-6xl">
+          <h1 className="text-3xl font-semibold leading-tight sm:text-4xl md:text-6xl">
             <span className="bg-gradient-to-r from-indigo-300 via-sky-400 to-purple-600 bg-clip-text text-transparent">Master your Interviews</span>{" "}
             <span className="text-white">with AI-Powered Mocks and Feedback</span>
           </h1>
-          <p className="mx-auto max-w-xl text-base text-qace-muted md:text-lg">
+          <p className="mx-auto max-w-xl text-sm text-qace-muted sm:text-base md:text-lg">
             Get multimodal feedback on your interview performance, track your progress over time, and practice with an AI interviewer that feels real.
           </p>
-          <div className="flex flex-wrap justify-center gap-3">
+          <div className="flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Link
               href="/setup"
               className="rounded-full bg-qace-primary px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:-translate-y-0.5 hover:bg-indigo-400"
@@ -250,52 +260,52 @@ export default function LandingPage() {
         </div>*/}
       </section>
 
-      <section className="relative z-10 mx-auto w-full max-w-6xl space-y-5 px-5 pb-14 md:px-8">
+      <section className="relative z-10 mx-auto w-full max-w-6xl space-y-5 px-4 pb-12 sm:px-6 md:px-8 md:pb-14">
         <div data-reveal className="reveal">
-          <h2 className="text-2xl font-semibold text-white md:text-3xl">Built for realistic prep loops</h2>
-          <p className="mt-2 max-w-2xl text-qace-muted">
+          <h2 className="text-xl font-semibold text-white sm:text-2xl md:text-3xl">Built for realistic prep loops</h2>
+          <p className="mt-2 max-w-2xl text-sm text-qace-muted sm:text-base">
             The fastest way to improve is a realistic mock + measurable feedback + immediate retry. This page is designed around that cycle.
           </p>
         </div>
-        <div className="reveal-stagger-row grid gap-4 md:grid-cols-3">
-          {benefitCards.map((card, index) => (
+        <div className="reveal-stagger-row grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+          {benefitCards.map((card) => (
             <article
               key={card.title}
               data-reveal
               className="reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-5 shadow-xl shadow-black/20"
             >
-              <h3 className="text-lg font-semibold text-white">{card.title}</h3>
+              <h3 className="text-base font-semibold text-white sm:text-lg">{card.title}</h3>
               <p className="mt-2 text-sm text-qace-muted">{card.text}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="relative z-10 mx-auto w-full max-w-6xl px-5 pb-20 md:px-8">
-        <div data-reveal className="reveal mb-6">
-          <h2 className="text-2xl font-semibold text-white md:text-3xl">Your interview journey</h2>
-          <p className="mt-2 text-qace-muted">Scroll through the full workflow before you enter the session room.</p>
+      <section className="relative z-10 mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6 md:px-8 md:pb-20">
+        <div data-reveal className="reveal mb-5 sm:mb-6">
+          <h2 className="text-xl font-semibold text-white sm:text-2xl md:text-3xl">Your interview journey</h2>
+          <p className="mt-2 text-sm text-qace-muted sm:text-base">Scroll through the full workflow before you enter the session room.</p>
         </div>
         <div className="reveal-stagger-row space-y-4">
-          {journey.map((item, index) => (
+          {journey.map((item) => (
             <article
               key={item.title}
               data-reveal
-              className="reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-6"
+              className="reveal card-glow rounded-2xl border border-white/20 bg-white/5 p-5 sm:p-6"
             >
-              <p className="text-xs uppercase tracking-wide text-qace-muted">{item.step}</p>
-              <h3 className="mt-2 text-2xl font-semibold text-white">{item.title}</h3>
+              <p className="text-[11px] uppercase tracking-wide text-qace-muted sm:text-xs">{item.step}</p>
+              <h3 className="mt-2 text-xl font-semibold text-white sm:text-2xl">{item.title}</h3>
               <p className="mt-2 max-w-2xl text-sm text-qace-muted">{item.detail}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="relative z-10 mx-auto w-full max-w-6xl px-5 pb-28 md:px-8">
-        <div data-reveal className="reveal card-glow rounded-3xl border border-white/25 bg-white/5 p-8 text-center">
-          <p className="text-xs uppercase tracking-[0.2em] text-qace-muted">Ready for your next interview?</p>
-          <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">Launch your AI mock interview now.</h2>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+      <section className="relative z-10 mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6 md:px-8 md:pb-24">
+        <div data-reveal className="reveal card-glow rounded-3xl border border-white/25 bg-white/5 p-6 text-center sm:p-8">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-qace-muted sm:text-xs">Ready for your next interview?</p>
+          <h2 className="mt-3 text-2xl font-semibold text-white sm:text-3xl md:text-4xl">Launch your AI mock interview now.</h2>
+          <div className="mt-6 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Link href="/setup" className="rounded-full bg-qace-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-400">
               Continue
             </Link>
@@ -307,6 +317,8 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      <Footer variant="marketing" />
     </main>
   );
 }

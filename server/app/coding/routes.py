@@ -475,6 +475,7 @@ async def _run_judge(
 async def list_dsa_problems(
     difficulty: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
+    _user: Optional[str] = Depends(require_user),
 ):
     """List DSA problems from the local JSON bank."""
     problems = _load_dsa_problems()
@@ -543,7 +544,10 @@ def _build_dsa_description(prob: dict[str, Any]) -> str:
 
 
 @router.get("/dsa/problems/{problem_id}")
-async def get_dsa_problem(problem_id: int):
+async def get_dsa_problem(
+    problem_id: int,
+    _user: Optional[str] = Depends(require_user),
+):
     """Get a single DSA problem formatted for CodingRoundView."""
     problems = _load_dsa_problems()
     prob = next((p for p in problems if p["id"] == problem_id), None)

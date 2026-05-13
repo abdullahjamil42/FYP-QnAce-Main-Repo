@@ -61,10 +61,18 @@ export default function SignupPage() {
     setLoading(true);
 
     // 1. Create the account
+    const emailRedirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/auth/callback`
+        : undefined;
+
     const { data: authData, error: authError } = await client.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName } },
+      options: {
+        data: { full_name: fullName },
+        emailRedirectTo,
+      },
     });
 
     if (authError || !authData.user) {
@@ -91,7 +99,8 @@ export default function SignupPage() {
     const { data: urlData } = client.storage.from(CV_BUCKET).getPublicUrl(cvPath);
 
     // 4. Insert user_profiles row (CV relation)
-    const { error: profileError } = await client.from("user_profiles").insert({
+    const profilesTable = client.from("user_profiles" as any) as any;
+    const { error: profileError } = await profilesTable.insert({
       id: userId,
       full_name: fullName,
       cv_path: cvPath,
@@ -101,14 +110,15 @@ export default function SignupPage() {
     });
 
     if (profileError) {
-      setLoading(false);
-      setError(`Profile creation failed: ${profileError.message}`);
-      return;
+      // Profile insert can race with email-verification — the user_profiles
+      // row will be retried on first login by the AppShell. Don't block here.
+      console.warn("user_profiles insert deferred:", profileError.message);
     }
 
     setLoading(false);
-    setMessage("Account created. If email confirmation is enabled, please verify your inbox.");
-    setTimeout(() => router.push("/login"), 900);
+    setMessage(
+      "Account created. We sent a verification link to your email — click it to activate your account, then sign in."
+    );
   }
 
   return (
