@@ -9,7 +9,7 @@ services:
     dockerfilePath: ./server/Dockerfile
     dockerContext: ./server
     region: oregon
-    plan: starter        # $7/mo — needed for ~512 MB RAM (Whisper tiny + app)
+    plan: standard       # $25/mo — 2 GB RAM needed for Voice (363MB) + Whisper + Face + FastAPI
     healthCheckPath: /health
 
     envVars:
@@ -69,6 +69,10 @@ services:
         value: /app/models/voice-emotion/qnace  # downloaded from abdullahjamil42/QnAce-Voice-Model
       - key: QACE_VOCAL_DEVICE
         value: cpu
+
+      # Text quality — use LLM backend (no BERT ONNX loaded, saves 420 MB RAM)
+      - key: QACE_TEXT_QUALITY_BACKEND
+        value: llm
 
       # ── ChromaDB (ephemeral — fine for demo/FYP) ──
       - key: QACE_CHROMA_DIR
