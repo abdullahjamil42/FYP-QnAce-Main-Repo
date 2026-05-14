@@ -4,11 +4,12 @@ Generates and manages study notes for technical interview topics.
 """
 
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from .auth import require_user
 from .config import get_settings
 from .intelligence.llm import (
     LLMProvider,
@@ -42,6 +43,7 @@ class NotesResponse(BaseModel):
 async def generate_notes(
     request: GenerateNotesRequest,
     llm_provider: LLMProvider = Depends(get_llm_provider),
+    _user: Optional[str] = Depends(require_user),
 ):
     """
     Generates extensive, structured study notes for a given topic using an LLM.

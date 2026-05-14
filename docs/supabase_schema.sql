@@ -29,6 +29,11 @@ create index if not exists interview_sessions_user_created_idx
 alter table public.interview_sessions
   add column if not exists coding_round jsonb;
 
+-- Per-question score breakdown captured during the live interview
+-- (used by /reports and /session/summary).
+alter table public.interview_sessions
+  add column if not exists per_question_scores jsonb not null default '[]'::jsonb;
+
 alter table public.interview_sessions enable row level security;
 
 drop policy if exists "Users can read own sessions" on public.interview_sessions;

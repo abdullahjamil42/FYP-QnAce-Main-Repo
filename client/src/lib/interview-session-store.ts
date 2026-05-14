@@ -169,6 +169,8 @@ export async function persistSession(draft: SessionDraft): Promise<SessionRecord
       transcript_events: localRecord.transcript_events,
       latest_perception: localRecord.latest_perception,
       webrtc_session_id: localRecord.webrtc_session_id,
+      per_question_scores: localRecord.per_question_scores,
+      coding_round: localRecord.coding_round ?? null,
     };
 
     const sessionsTable = client.from("interview_sessions" as any) as any;

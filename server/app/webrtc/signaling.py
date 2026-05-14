@@ -366,6 +366,8 @@ class OfferRequest(BaseModel):
     type: str = "offer"
     job_role: str = "software_engineer"
     interview_type: str = "quick"
+    coding_problem_id: str = ""
+    coding_source: str = ""
 
 
 class AnswerResponse(BaseModel):
@@ -503,6 +505,9 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
         "interviewer_voice": random.choice(["male", "female"]),  # Gap 3: locked per session
         "last_interviewer_mode": "",               # Gap 2: mode-aware ack
         "soft_prompt_sent": False,                 # Gap 5: mid-silence nonverbal at 5s
+        # Coding round
+        "coding_problem_id": req.coding_problem_id,
+        "coding_source": req.coding_source,
     }
     _sessions[session_id] = session
 
@@ -1561,6 +1566,12 @@ async def handle_offer(req: OfferRequest, user_id: str | None = _Depends(_requir
                 send_question(channel, INTRO_QUESTION, -1, len(questions), "intro", _get_current_voice(session))
 
                 async def _begin_interview():
+                    # If a coding problem was configured, tell the client to mount overlay
+                    coding_pid = session.get("coding_problem_id", "")
+                    if coding_pid:
+                        from .data_channel import send_coding_start
+                        send_coding_start(channel, coding_pid, session.get("coding_source", ""))
+
                     # Speak the intro question — await full playback
                     session["current_phase"] = "speaking"
                     send_phase(channel, "speaking", 0)

@@ -121,6 +121,14 @@ def send_answer_complete(
     })
 
 
+def send_coding_start(channel: Any, problem_id: str, source: str) -> None:
+    """Tell the client to mount the coding overlay for the given problem."""
+    send_event(channel, "coding_start", {
+        "problem_id": problem_id,
+        "source": source,
+    })
+
+
 def parse_au_telemetry(data: bytes) -> Optional[AUTelemetry]:
     """
     Parse binary AU telemetry packet (20 bytes).

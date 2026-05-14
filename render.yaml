@@ -1,0 +1,85 @@
+# Render deployment config for Q&Ace backend
+# Frontend is deployed separately on Vercel (client/ directory)
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: qace-backend
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    region: oregon
+    plan: standard       # $25/mo — 2 GB RAM needed for Voice (363MB) + Whisper + Face + FastAPI
+    healthCheckPath: /health
+
+    envVars:
+      # ── App ──
+      - key: QACE_ENV
+        value: production
+      - key: QACE_HOST
+        value: 0.0.0.0
+      - key: QACE_PORT
+        value: "8000"
+      - key: QACE_LOG_LEVEL
+        value: info
+      - key: QACE_REQUIRE_AUTH
+        value: "true"
+
+      # ── LLM (Groq) ──
+      - key: QACE_LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false   # ← paste value in Render dashboard
+      - key: QACE_GROQ_MODEL
+        value: llama-3.3-70b-versatile
+
+      # ── Supabase ──
+      - key: SUPABASE_URL
+        value: https://hgcjkdeqzayvhgaustuv.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false   # ← paste value in Render dashboard
+      - key: SUPABASE_JWT_SECRET
+        sync: false   # ← paste value in Render dashboard
+
+      # ── CORS — add your Vercel URL after first deploy ──
+      - key: QACE_CORS_ORIGINS
+        sync: false   # e.g. https://qace.vercel.app,http://localhost:3000
+
+      # ── TTS ──
+      - key: QACE_TTS_BACKEND
+        value: edge
+
+      # ── Perception models ──
+      # Whisper auto-downloads to ~/.cache/huggingface on first request
+      - key: QACE_WHISPER_MODEL
+        value: tiny.en
+      - key: QACE_MODEL_DIR
+        value: /app/models
+      # Silero VAD is downloaded at Docker build time (see Dockerfile)
+      - key: QACE_SILERO_ONNX
+        value: /app/models/silero-vad/silero_vad.onnx
+      # Face / BERT / vocal ONNX — graceful no-op if files absent on Render
+      - key: QACE_FACE_ONNX
+        value: /app/models/face-emotion/efficientnet_b2.onnx  # not used — registry loads from qnace/ dir
+      - key: QACE_BERT_ONNX
+        value: /app/models/text-quality/bert_quality.onnx  # uncomment HF download in Dockerfile once uploaded
+      - key: QACE_BERT_TOKENIZER
+        value: bert-base-uncased  # downloads from HF at startup (standard vocab, no custom files needed)
+      - key: QACE_VOCAL_MODEL
+        value: /app/models/voice-emotion/qnace  # downloaded from abdullahjamil42/QnAce-Voice-Model
+      - key: QACE_VOCAL_DEVICE
+        value: cpu
+
+      # Text quality — use LLM backend (no BERT ONNX loaded, saves 420 MB RAM)
+      - key: QACE_TEXT_QUALITY_BACKEND
+        value: llm
+
+      # ── ChromaDB (ephemeral — fine for demo/FYP) ──
+      - key: QACE_CHROMA_DIR
+        value: /tmp/chroma
+
+      # ── VAD tuning ──
+      - key: QACE_VAD_SILENCE_MS
+        value: "300"
+      - key: QACE_VAD_MIN_SPEECH_S
+        value: "1.0"

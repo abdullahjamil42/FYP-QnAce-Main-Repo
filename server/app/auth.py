@@ -27,7 +27,13 @@ _bearer = HTTPBearer(auto_error=False)
 def _decode_jwt(token: str, secret: str) -> dict:
     try:
         import jwt  # PyJWT
-        return jwt.decode(token, secret, algorithms=["HS256"], audience="authenticated")
+        return jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+            options={"verify_exp": True, "verify_aud": True, "verify_signature": True},
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -47,6 +53,7 @@ async def require_user(
     settings = get_settings()
 
     if not settings.require_auth:
+        logger.warning("⚠ AUTH BYPASS ACTIVE — QACE_REQUIRE_AUTH=false; dev-only")
         # Dev mode: auth optional, extract user_id if token present
         if creds and creds.credentials and settings.supabase_jwt_secret:
             try:
@@ -61,10 +68,20 @@ async def require_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization header required",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     if not settings.supabase_jwt_secret:
-        logger.error("SUPABASE_JWT_SECRET not set but QACE_REQUIRE_AUTH=true")
+        logger.error(
+            "SUPABASE_JWT_SECRET not set but QACE_REQUIRE_AUTH=true — "
+            "set the secret from Supabase dashboard → Settings → API → JWT Secret."
+        )
         raise HTTPException(status_code=500, detail="Auth misconfigured on server")
 
     payload = _decode_jwt(creds.credentials, settings.supabase_jwt_secret)
-    return payload.get("sub")
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing subject claim",
+        )
+    return user_id

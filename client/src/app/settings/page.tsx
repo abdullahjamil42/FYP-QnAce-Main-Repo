@@ -23,12 +23,11 @@ function CvSection({ user }: { user: User | null }) {
     if (!user) { setProfileLoading(false); return; }
     const client = getSupabaseClient();
     if (!client) { setProfileLoading(false); return; }
-    void client
-      .from("user_profiles")
+    void (client.from("user_profiles" as any) as any)
       .select("cv_url, cv_filename, cv_uploaded_at")
       .eq("id", user.id)
       .single()
-      .then(({ data }) => {
+      .then(({ data }: { data: { cv_url: string | null; cv_filename: string | null; cv_uploaded_at: string | null } | null }) => {
         if (data) {
           setExistingCvUrl(data.cv_url ?? null);
           setExistingCvName(data.cv_filename ?? "resume.pdf");
@@ -78,7 +77,7 @@ function CvSection({ user }: { user: User | null }) {
     const now = new Date().toISOString();
 
     // Update user_profiles table (source of truth)
-    await client.from("user_profiles").upsert({
+    await (client.from("user_profiles" as any) as any).upsert({
       id: user.id,
       cv_path: cvPath,
       cv_url: urlData.publicUrl,
@@ -191,8 +190,8 @@ export default function SettingsPage() {
   useEffect(() => {
     const client = getSupabaseClient();
     if (!client) return;
-    client.auth.getUser().then(({ data }) => setUser(data.user ?? null));
-    const { data: { subscription } } = client.auth.onAuthStateChange((_e, session) => {
+    client.auth.getUser().then((res: { data: { user: User | null }; error: unknown }) => setUser(res.data.user ?? null));
+    const { data: { subscription } } = client.auth.onAuthStateChange((_e: unknown, session: any) => {
       setUser(session?.user ?? null);
     });
     return () => subscription.unsubscribe();
