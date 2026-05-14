@@ -7,7 +7,7 @@ services:
     name: qace-backend
     runtime: docker
     dockerfilePath: ./server/Dockerfile
-    dockerContext: ./server
+    dockerContext: .
     region: oregon
     plan: standard       # $25/mo — 2 GB RAM needed for Voice (363MB) + Whisper + Face + FastAPI
     healthCheckPath: /health
@@ -55,6 +55,9 @@ services:
         value: tiny.en
       - key: QACE_MODEL_DIR
         value: /app/models
+      # ChromaDB — included from repo root data/chroma/ via dockerContext: .
+      - key: QACE_CHROMA_DIR
+        value: /app/data/chroma
       # Silero VAD is downloaded at Docker build time (see Dockerfile)
       - key: QACE_SILERO_ONNX
         value: /app/models/silero-vad/silero_vad.onnx

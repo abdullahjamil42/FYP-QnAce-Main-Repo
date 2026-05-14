@@ -1,0 +1,47 @@
+# ─── Docker build exclusions (repo-root context) ───────────────────────────
+# Only server/ code + data/chroma/ rubrics are needed in the image.
+# Heavy local artefacts that are downloaded at build time (Dockerfile) or
+# irrelevant to the backend are excluded to keep the build context small.
+
+# ── Frontend ──
+client/
+
+# ── Local ML adapter weights (not used on Render — Groq is the LLM) ──
+adapters/
+qace-coach-merged/
+qace-evaluator-merged/
+qace-llm-package/
+
+# ── Local model weights (downloaded by Dockerfile at build time) ──
+models/
+server/models/
+
+# ── Notebook / training artefacts ──
+*.ipynb
+*.jsonl
+logs/
+eval/
+
+# ── Python cache ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ── IDE / OS ──
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# ── Secrets ──
+.env
+.env.local
+.env.production
+*.env
+
+# ── Node ──
+node_modules/
+.next/

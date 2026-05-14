@@ -46,7 +46,7 @@ models/models--*/
 
 # ────── Data stores ──────
 data/chroma/*.parquet
-data/chroma/chroma.sqlite3
+# chroma.sqlite3 is committed so Render's Docker build includes the rubrics collection
 
 # ────── Environment ──────
 .env

@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python deps
-COPY requirements.txt .
+# Install Python deps (requirements.txt lives in server/ subdir of repo root context)
+COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Download Silero VAD ONNX (~2 MB) at build time so it's always available
@@ -34,8 +34,11 @@ RUN huggingface-cli download abdullahjamil42/QnAce-Text-Quality \
     --local-dir models/text-quality \
     --local-dir-use-symlinks False
 
-# Copy server code
-COPY . .
+# Copy server code from server/ subdirectory
+COPY server/ .
+
+# Copy ChromaDB data (rubrics collection) from repo root data/chroma/
+COPY data/chroma/ ./data/chroma/
 
 # Expose port
 EXPOSE 8000

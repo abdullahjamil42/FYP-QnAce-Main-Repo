@@ -27,13 +27,32 @@ _bearer = HTTPBearer(auto_error=False)
 def _decode_jwt(token: str, secret: str) -> dict:
     try:
         import jwt  # PyJWT
+
+        # Read the algorithm from the token header so we don't reject valid
+        # tokens that use HS384/HS512.  Only HMAC variants are accepted —
+        # RS256 and alg=none are explicitly blocked to prevent bypass attacks.
+        try:
+            header = jwt.get_unverified_header(token)
+        except Exception as exc:
+            raise ValueError(f"Malformed token header: {exc}")
+
+        alg = header.get("alg", "HS256")
+        if alg not in ("HS256", "HS384", "HS512"):
+            raise ValueError(
+                f"Unsupported token algorithm '{alg}'. Only HMAC (HS256/384/512) is accepted."
+            )
+
+        # PyJWT 2.x options dict is for DISABLING checks (set False to skip).
+        # Passing True has no effect and can cause issues in some versions —
+        # leave options at defaults which verify exp, nbf, iat, aud, and sig.
         return jwt.decode(
             token,
             secret,
-            algorithms=["HS256"],
+            algorithms=[alg],
             audience="authenticated",
-            options={"verify_exp": True, "verify_aud": True, "verify_signature": True},
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
