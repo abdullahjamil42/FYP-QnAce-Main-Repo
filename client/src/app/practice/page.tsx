@@ -711,11 +711,11 @@ export default function PracticePage() {
       {mode === "study" ? (
         <div className="flex flex-col" style={{ minHeight: "70vh" }}>
           {/* Folder (topic) pill bar */}
-          <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl px-4 py-3 grid grid-cols-5 gap-2 mb-4">
+          <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl px-4 py-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-4">
             {bucketTopicsLoading
               ? [...Array(10)].map((_, i) => <div key={i} className="h-9 bg-gray-700 rounded-lg animate-pulse" />)
               : bucketTopics.length === 0
-              ? <p className="text-gray-500 text-sm col-span-5 text-center">No notes available.</p>
+              ? <p className="text-gray-500 text-sm col-span-2 sm:col-span-3 md:col-span-4 lg:col-span-5 text-center">No notes available.</p>
               : bucketTopics.map((t) => (
                   <button
                     key={t.folder}
@@ -735,22 +735,22 @@ export default function PracticePage() {
               <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : folderFiles.length > 0 ? (
-            <div className="flex gap-4 items-start flex-1 min-h-0">
+            <div className="flex flex-col md:flex-row gap-4 items-start flex-1 min-h-0">
               {/* Sub-topic sidebar — each file in the folder */}
-              <div className="w-56 shrink-0 sticky top-4">
+              <div className="w-full md:w-56 md:shrink-0 md:sticky md:top-4">
                 <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/40 rounded-2xl overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-700/50">
                     <h3 className="text-gray-300 font-semibold text-xs uppercase tracking-widest">Sub-Topics</h3>
                   </div>
-                  <nav className="py-1">
+                  <nav className="py-1 flex flex-row flex-wrap md:flex-col gap-1 md:gap-0 p-2 md:p-0">
                     {folderFiles.map((f, idx) => (
                       <button
                         key={f.path}
                         onClick={() => void handleSelectStudyTopic(f.path)}
-                        className={`w-full text-left px-4 py-2.5 text-sm transition-all border-l-2 ${
+                        className={`md:w-full text-left px-3 md:px-4 py-1.5 md:py-2.5 text-xs md:text-sm rounded-lg md:rounded-none transition-all md:border-l-2 ${
                           selectedStudyTopic === f.path
-                            ? "bg-blue-600/20 text-blue-400 font-semibold border-blue-500"
-                            : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/40 border-transparent"
+                            ? "bg-blue-600/30 text-blue-400 font-semibold md:border-blue-500"
+                            : "text-gray-400 hover:text-gray-200 hover:bg-gray-700/40 md:border-transparent"
                         }`}
                       >
                         {f.label}
@@ -768,7 +768,7 @@ export default function PracticePage() {
                   </div>
                 ) : selectedStudyTopic && notes[selectedStudyTopic] ? (
                   <>
-                    <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-10 py-8">
+                    <div className="bg-white text-gray-900 rounded-2xl shadow-2xl px-4 py-5 sm:px-8 sm:py-7">
                       <h2 className="text-2xl font-extrabold text-blue-700 mb-6 pb-3 border-b-2 border-blue-100 tracking-tight">
                         {folderFiles.find((f) => f.path === selectedStudyTopic)?.label ?? ""}
                       </h2>
