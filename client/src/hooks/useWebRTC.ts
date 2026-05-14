@@ -15,6 +15,19 @@
  */
 
 import { useCallback, useRef, useState } from "react";
+import { getSupabaseClient } from "@/lib/supabase";
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return {};
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
 
 export type ConnectionState = "idle" | "connecting" | "connected" | "error";
 
@@ -189,7 +202,7 @@ export function useWebRTC() {
       const apiUrl = getApiUrl();
       const resp = await fetch(`${apiUrl}/webrtc/offer`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({
           sdp: pc.localDescription!.sdp,
           type: pc.localDescription!.type,
