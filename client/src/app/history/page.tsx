@@ -33,7 +33,8 @@ export default function HistoryPage() {
         </Link>
       }
     >
-      <div className="card-glow animate-fade-up overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
+      {/* Desktop table — lg and above */}
+      <div className="card-glow animate-fade-up hidden lg:block overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-xl shadow-black/40 backdrop-blur-md">
         <table className="w-full text-left text-sm">
           <thead className="bg-white/5 text-qace-muted">
             <tr>
@@ -71,6 +72,35 @@ export default function HistoryPage() {
             ) : null}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile / tablet cards — below lg */}
+      <div className="flex flex-col gap-3 lg:hidden animate-fade-up">
+        {sessions.length === 0 ? (
+          <div className="rounded-2xl border border-white/20 bg-white/5 px-4 py-8 text-center text-sm text-qace-muted backdrop-blur-md">
+            No sessions yet. Start your first interview from the live session page.
+          </div>
+        ) : sessions.map((item) => (
+          <div key={item.id} className="rounded-2xl border border-white/20 bg-white/5 px-4 py-4 shadow-lg backdrop-blur-md flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs text-qace-muted">{item.id.slice(0, 8)}</span>
+              <Badge tone={item.final_score < 70 ? "warning" : "success"}>{item.status}</Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs text-qace-muted">{new Date(item.created_at).toLocaleDateString()}</span>
+                <span className="text-sm text-gray-300 capitalize">{item.mode}</span>
+              </div>
+              <span className="text-3xl font-bold text-white">{item.final_score.toFixed(0)}<span className="text-sm text-qace-muted ml-1">/100</span></span>
+            </div>
+            <Link
+              href={`/reports/${item.id}`}
+              className="w-full text-center rounded-xl border border-white/15 bg-white/5 py-2 text-sm font-medium text-qace-accent transition hover:bg-white/10 hover:text-sky-200"
+            >
+              Open Report →
+            </Link>
+          </div>
+        ))}
       </div>
     </AppShell>
   );
