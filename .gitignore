@@ -58,7 +58,6 @@ data/chroma/chroma.sqlite3
 *.wav
 *.mp4
 *.jpg
-*.png
 *.onnx
 !docs/**/*.png
 
