@@ -66,15 +66,15 @@ export default function AppShell({
 
     let mounted = true;
 
-    client.auth.getUser().then(({ data }) => {
+    client.auth.getUser().then((res: { data: { user: User | null }; error: unknown }) => {
       if (mounted) {
-        setUser(data.user ?? null);
+        setUser(res.data.user ?? null);
       }
     });
 
     const {
       data: { subscription },
-    } = client.auth.onAuthStateChange((_event, session) => {
+    } = client.auth.onAuthStateChange((_event: unknown, session: any) => {
       setUser(session?.user ?? null);
     });
 

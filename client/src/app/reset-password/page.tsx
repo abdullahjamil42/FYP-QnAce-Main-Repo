@@ -18,7 +18,7 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     const client = getSupabaseClient();
     if (!client) return;
-    client.auth.getSession().then(({ data }) => {
+    client.auth.getSession().then(({ data }: { data: { session: unknown }; error: unknown }) => {
       if (data.session) {
         setSessionReady(true);
       } else {

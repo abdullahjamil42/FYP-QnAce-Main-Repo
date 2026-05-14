@@ -22,18 +22,18 @@ export async function listNoteFolders(): Promise<{ folder: string; label: string
 
   const { data } = await supabase.storage.from(BUCKET).list("", { limit: 200 });
   const folders = (data ?? []).filter(
-    (f) => !f.name.startsWith(".") && !/\.[a-z0-9]+$/i.test(f.name)
+    (f: { name: string }) => !f.name.startsWith(".") && !/\.[a-z0-9]+$/i.test(f.name)
   );
   if (folders.length === 0) {
     // Fallback: no folders found — treat root .md/.txt files as flat topics
-    const files = (data ?? []).filter((f) => /\.(md|txt)$/i.test(f.name));
+    const files = (data ?? []).filter((f: { name: string }) => /\.(md|txt)$/i.test(f.name));
     return files
-      .map((f) => ({ folder: f.name, label: toLabel(f.name) }))
-      .sort((a, b) => naturalCompare(a.label, b.label));
+      .map((f: { name: string }) => ({ folder: f.name, label: toLabel(f.name) }))
+      .sort((a: { label: string }, b: { label: string }) => naturalCompare(a.label, b.label));
   }
   return folders
-    .map((f) => ({ folder: f.name, label: f.name }))
-    .sort((a, b) => naturalCompare(a.label, b.label));
+    .map((f: { name: string }) => ({ folder: f.name, label: f.name }))
+    .sort((a: { label: string }, b: { label: string }) => naturalCompare(a.label, b.label));
 }
 
 /**
@@ -46,10 +46,10 @@ export async function listFolderFiles(
   if (!supabase) return [];
 
   const { data } = await supabase.storage.from(BUCKET).list(folder, { limit: 200 });
-  const files = (data ?? []).filter((f) => /\.(md|txt)$/i.test(f.name));
+  const files = (data ?? []).filter((f: { name: string }) => /\.(md|txt)$/i.test(f.name));
   return files
-    .map((f) => ({ path: `${folder}/${f.name}`, label: toLabel(f.name) }))
-    .sort((a, b) => naturalCompare(a.label, b.label));
+    .map((f: { name: string }) => ({ path: `${folder}/${f.name}`, label: toLabel(f.name) }))
+    .sort((a: { label: string }, b: { label: string }) => naturalCompare(a.label, b.label));
 }
 
 // ---------------------------------------------------------------------------

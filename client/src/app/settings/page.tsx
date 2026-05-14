@@ -190,8 +190,8 @@ export default function SettingsPage() {
   useEffect(() => {
     const client = getSupabaseClient();
     if (!client) return;
-    client.auth.getUser().then(({ data }) => setUser(data.user ?? null));
-    const { data: { subscription } } = client.auth.onAuthStateChange((_e, session) => {
+    client.auth.getUser().then((res: { data: { user: User | null }; error: unknown }) => setUser(res.data.user ?? null));
+    const { data: { subscription } } = client.auth.onAuthStateChange((_e: unknown, session: any) => {
       setUser(session?.user ?? null);
     });
     return () => subscription.unsubscribe();

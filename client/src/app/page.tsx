@@ -74,9 +74,9 @@ export default function LandingPage() {
 
     let mounted = true;
 
-    client.auth.getUser().then(({ data }: { data: any }) => {
+    client.auth.getUser().then((res: { data: { user: User | null }; error: unknown }) => {
       if (mounted) {
-        setUser(data.user ?? null);
+        setUser(res.data.user ?? null);
       }
     });
 
